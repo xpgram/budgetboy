@@ -1,0 +1,54 @@
+
+PS C:\Users\xpgra> budgetboy
+
+Mar 15, 2019
+
+Mar 22  Paycheck                               +$900
+Apr 01  Loan: The Tech Academy                 -$240
+Apr 01  Providence H.Insurance                 -$116
+Apr 01  Dominion National Teeth Insurance       -$20
+Apr 03  Google Play                             -$10
+Apr 05  Paycheck                               +$900
+Apr 09  Netflix                                 -$12
+Apr 12  Rent                                   -$300    This block is the next month's payments
+Apr 13  HBO Now                                 -$15    Next month as in 30 days from today
+Apr 15  AmazonPrime                            -$120
+Apr 15  Loan: Laptop                            -$55
+
+Jun 01* The Tech Academy              **      -$1750    I think marked ** important payments should be
+                                                        visually separated from the list. Unless they're
+        Net Total for 30-day projection:       +$912    due within 30 days, that is.
+
+
+Itemized Budget (Mar)                                   Maybe start projecting Apr after Mar 25th
+====================================================
+  x2  Paycheck                                +$1800    This rolls back the clock to (this month) 1st
+  x1  Dominion National Teeth Insurance         -$20
+  x1  Google Play                               -$10
+  --  Food                                     -$100
+  x1  HBO Now                                   -$15
+  x1  Loan: The Tech Academy                   -$240
+  x1  Loan: Laptop                              -$55
+  x1  Netflix                                   -$12    And runs it through (this month)'s end
+  x1  Providence H.Insurance                   -$116    Tallying up the points.
+  x1  Rent                                     -$300    Aside: Clock rollback only goes back 1 year for non-recurring payments.
+  --  Transportation                           -$160
+  x4  Luxury                                   -$140    Luxury counts all labels 'Luxury' and totals them (x4 in this case means 4 occurences, not 4 payments of $140)
+  
+      Net Total                                +$632    The logic involved in this particular feature
+      Total Savings (Recorded)                 $2241    can be used to ask budgetboy to project net-totals
+====================================================    over much larger widths of time.
+                                                        I am ~probably not~ going to load this app with
+PS C:\Users\xpgra>                                      every extra purchase I ever make, so the practicality
+                                                        of this projection feature is mostly ~forward~
+                                                        through time, but still, you understand.
+                                                    
+                                                   
+                                                    
+PS C:\Users\xpgra> budgetboy bills
+
+Providence H.Insurance              -$116   Monthly     This feature shows all bills as recorded in memory
+Rent                                -$300   Monthly
+HarmonTown                           -$45   Annual
+AmazonPrime                         -$120   Annual
+
