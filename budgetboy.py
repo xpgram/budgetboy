@@ -21,15 +21,17 @@ class Program:
 
     header = [program.NAME, program.AMOUNT, program.DDATE, program.TDATE, program.PERIOD, program.IMPORTANT]
 
-    def run():
+    def __init__(self):
         dt = datetime.now()
         curDate = DueDate(dt.day, dt.month, dt.year)
         projectionDate = curDate += Time(months=4)
         budgetItems = []
-        bugetPeriod = []
-        
+        budgetPeriod = []
+
         arg = sys.argv
         datafilePath = "C:\\Users\\xpgra\\Home\\Scripts\\Data\\budgetboy_data"
+
+    def run():
         
         ## Load from file
         try:
@@ -180,25 +182,66 @@ class Program:
         f.close()
 
     def load(self):
+        ## Open the datafile
+        try:
+            f = open(program.datafile, 'x')
+        except FileExistsError:
+            pass
+        f = open(program.datafile, 'r')
+
         ## read first line, should be the DB header
+        line = f.readline()
 
         ## verify its terms are.. correct?
+        if line:
+            for h in program.header:
+                if not line.find(h):
+                    raise Exception("File appears to be corrupt: file content does not match expected format.")
+        
+        ## Break the header line into discrete pieces
+        n = 0
+        columnNames = []
+        while n < len(line):
+            columnNames.append(line[0:line.find(program.separatorChar, n)])
+            n = line.find(program.separatorChar, n) + len(program.separatorChar)
 
         ## Iterate over the proceeding lines, parsing them by the separator char
         ## (Also, remove the \n before iteration)
-
-        ## read the values into a dict called loadedItem
-        ## loadedItem[header[i]] = s.find(program.separatorChar, n)
         loadedItem = {}
-
-        ## pull from this dict the relevant data via their keys
-        ## name = loadedItem[program.NAME]
-
-        ## insert all this dict data into a new expense object
-        ## Expense(name, amount, date ...), or
-        ## Expense(loadedItem[program.NAME], loadedItem[program.AMOUNT], ...)
+        while line:
+            line = f.readline()
+            line = line[0:line.find('\n')]
+            
+            ## Add each piece of data to the dictionary key associated.
+            n = 0
+            for i in range(0, len(columnNames)):
+                loadedItem[columnNames[i]] = line[0:line.find(program.separatorChar, n)]
+                n = line.find(program.separatorChar, n) + len(program.separatorChar)
+            
+            ## Reconfigure strings into integers ~if possible~
+            for i in loadedItem.keys:
+                try:
+                    loadedItem[i] = int(loadedItem[i])
+                except ValueError:
+                    pass
+            
+            ## Create an expense object and load its dictionary of fields with the dictionary of loaded data.
+            e = Expense()
+            for h in program.header:
+                e.fields[h] = loadedItem[h]
+            program.budgetItems.append(e)
 
 class Expense:
+
+    ## Rewrite
+
+    ## Expense (and the other classes too, for that matter) is going to use a dictionary for
+    ## its fields instead of declared variables.
+    ## Load uses Expense() with no parameters, so fix the constructor.
+    ## Add a method which adds all the necessary fields in one action; perhaps taking a dict as
+    ##    a parameter and simply verifying it has all the right contents.
+    ## Add or reform the valid() method to confirm the expense object isn't empty and useless,
+    ##    particularly because Expense() is now a valid call.
 
     def __init__(self, name, amount, date=None, payperiod = Period.Monthly, important=False):
         self.name = name
