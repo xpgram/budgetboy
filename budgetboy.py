@@ -149,8 +149,6 @@ class Program:
     ## Searchable: [Main() Rewrite]
 
     def save(self):
-        saveLine = {}
-
         ## Open the data file
         ## Also, I'm doing the try/except block because.. of paranoia, I think. Is it even necessary?
         try:
@@ -160,22 +158,14 @@ class Program:
         f = open(program.datafile, 'w')
 
         ## Write all header fields into one line using the separator char.
-        for h in header:
+        for h in program.header:
             f.write(h + program.separatorChar)
         f.write("\n")
 
         ## Write each budget item as a line, following the format of the header fields, using the separator char.
         for b in budgetItems:
-            ## TODO I won't do this until later, but if b used a dictionary for its fields itself, this block wouldn't be necessary. Probably.
-            saveLine[program.NAME] = b.name
-            saveLine[program.AMOUNT] = b.amount
-            saveLine[program.DDATE] = str(b.date)
-            saveLine[program.TDATE] = str(b.terminationDate)
-            saveLine[program.PERIOD] = b.payperiod.name
-            saveLine[program.IMPORTANT] = b.important
-
-            for sl in saveLine:
-                f.write(sl + program.separatorChar)
+            for key in b.fields:
+                f.write(b.fields[key] + program.separatorChar)
             f.write("\n")
         
         ## Close the data file
@@ -202,34 +192,35 @@ class Program:
         n = 0
         columnNames = []
         while n < len(line):
-            columnNames.append(line[0:line.find(program.separatorChar, n)])
+            columnNames.append(line[n:line.find(program.separatorChar, n)])
             n = line.find(program.separatorChar, n) + len(program.separatorChar)
 
         ## Iterate over the proceeding lines, parsing them by the separator char
         ## (Also, remove the \n before iteration)
-        loadedItem = {}
         while line:
             line = f.readline()
             line = line[0:line.find('\n')]
+            e = Expense()
             
             ## Add each piece of data to the dictionary key associated.
             n = 0
             for i in range(0, len(columnNames)):
-                loadedItem[columnNames[i]] = line[0:line.find(program.separatorChar, n)]
+                e.fields[columnNames[i]] = line[n:line.find(program.separatorChar, n)]
                 n = line.find(program.separatorChar, n) + len(program.separatorChar)
             
-            ## Reconfigure strings into integers ~if possible~
-            for i in loadedItem.keys:
-                try:
-                    loadedItem[i] = int(loadedItem[i])
-                except ValueError:
-                    pass
+            # Reconfigure strings into integers ~if possible~
+            # TODO This should probably be done ~in~ the Expense object.
+            try:
+                e.fields[program.AMOUNT] = int(e.fields[program.AMOUNT])
+            except ValueError:
+                pass
             
-            ## Create an expense object and load its dictionary of fields with the dictionary of loaded data.
-            e = Expense()
-            for h in program.header:
-                e.fields[h] = loadedItem[h]
-            program.budgetItems.append(e)
+            # Verify the object, and add it to memory
+            if e.hardValidate():
+                program.budgetItems.append(e)
+
+            # TODO Add .hardValidate() to Expense objects; raise an error when data doesn't conform.
+            # This method will confirm the right kind of data, the right number of fields, etc.
 
 class Expense:
 
@@ -242,6 +233,9 @@ class Expense:
     ##    a parameter and simply verifying it has all the right contents.
     ## Add or reform the valid() method to confirm the expense object isn't empty and useless,
     ##    particularly because Expense() is now a valid call.
+
+    def __init__(self):
+        self.fields = {}
 
     def __init__(self, name, amount, date=None, payperiod = Period.Monthly, important=False):
         self.name = name
