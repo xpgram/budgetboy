@@ -9,22 +9,15 @@ from enum import Enum
 
 class Program:
     
-    separatorChar = '`'
+    self.separatorChar = '`'
+    self.curDate
 
-    ## These constants are names for database columns. They're for saving/loading data.
-    NAME = 'Nm'
-    AMOUNT = 'Amt'
-    DDATE = 'DD'
-    TDATE = 'TD'
-    PERIOD = 'P'
-    IMPORTANT = 'I'
-
-    header = [program.NAME, program.AMOUNT, program.DDATE, program.TDATE, program.PERIOD, program.IMPORTANT]
+    header = [Terms.NAME, Terms.ID, Terms.AMOUNT, Terms.DDATE, Terms.TDATE, Terms.PERIOD, Terms.IMPORTANT]
 
     def __init__(self):
         dt = datetime.now()
-        curDate = DueDate(dt.day, dt.month, dt.year)
-        projectionDate = curDate += Time(months=4)
+        self.curDate = DueDate(dt.day, dt.month, dt.year)
+        projectionDate = self.curDate += Time(months=4)
         budgetItems = []
         budgetPeriod = []
 
@@ -234,71 +227,101 @@ class Expense:
     ## Add or reform the valid() method to confirm the expense object isn't empty and useless,
     ##    particularly because Expense() is now a valid call.
 
+    # Fields: name, id, amount, ddate, payperiod, tdate, important
+
+    # id, in case I forget, is calculated thusly:
+    #     01 -- 99 (in order of creation), + 1 random digit.
+    #     ex: 017 023 039 041
+    # The extra digit helps prevent accidental reference, I pretend is the reason.
+    # These id's are saved in the record, and become each item's "second name" for ease of use purposes.
+
     def __init__(self):
         self.fields = {}
+        
+    # Returns true if all required fields are filled in and with correct data.
+    def valid(self):
+        t1 = False
+        t2 = False
 
-    def __init__(self, name, amount, date=None, payperiod = Period.Monthly, important=False):
-        self.name = name
-        self.amount = amount
-        self.date = date
-        self.payperiod = payperiod
-        self.terminationDate = None         ## When this item stops existing. For when I cancel a bill or get a promotion, etc.
-        self.important = important          ## This flag essentially means "always show." Great for singular large-sum payments whose due date may or may not be looming over my head
-        
-    def string(self):
-        return '-$' + str(self.amount)
-        
-    def amount(self):
-        return -self.amount
+        # TDATE isn't critical, so if it's invalid, just get rid of it.
+        if (type(self.fields[Terms.TDATE]) != DueDate or
+            self.fields[Terms.TDATE].valid() == False):
+            self.fields[Terms.TDATE] == None
+
+        # Confirm all fields are the correct type.
+        if (type(self.fields[Terms.NAME]) == str and
+            type(self.fields[Terms.ID]) == str and
+            type(self.fields[Terms.AMOUNT]) == int and
+            type(self.fields[Terms.PERIOD]) == Period and
+            type(self.fields[Terms.DDATE]) == DueDate and
+            type(self.fields[Terms.IMPORTANT]) == bool):
+            t1 = True
+
+        # Confirm all fields have legal values.
+        if (self.fields[Terms.NAME] != "" and
+            int(self.fields[Terms.ID]) > 0 and
+            int(self.fields[Terms.ID]) <= 999 and
+            self.fields[Terms.AMOUNT] > 0 and
+            Period.valid(self.fields[Terms.PERIOD]) and
+            self.fields[Terms.DDATE].valid()):
+            t2 = True
+
+        return t1 and t2
+
+    # Returns this expense's amount as a string in currency format
+    def amountStr(self):
+        return '-$' + str(self.fields[program.AMOUNT])
     
-    def advancePeriod(self):
-        self.date = self.date.advanceTime(self.payperiod)
+    # Rolls the due-date forward by one payperiod.
+    # 'budgetboy -p [name|id]' or 'budgetboy -rf [name|id]' do this as well, if the bill has been payed.
+    def rollForward(self):
+        self.fields[Terms.DDATE] = self.fields[Terms.DDATE].advancePeriod(self.fields[Terms.PERIOD])
     
-    def recedePeriod(self):
-        self.date = self.date.recedeTime(self.payperiod)
+    # Rolls the due-date backward by one payperiod.
+    # This function does not take into account real bill history, it only projects backward in time.
+    def rollBack(self):
+        self.fields[Terms.DDATE] = self.fields[Terms.DDATE].recedePeriod(self.fields[Terms.PERIOD])
     
-    ## This will affect when the bill stops being inluded in the budget.
-    ## If the bill has passed its expiration, it will remain in memory for rollback for 1 year
+    # This schedules the cancellation of a bill. If cancelled on its due-date, the bill is considered valid through the next payperiod.
+    # If the bill has passed its expiration, it will remain in the record for 1 year before being removed.
     def terminateOn(self, date):
         if not isinstance(date, DueDate):
             raise TypeError("expected a DueDate object, got {}".format(type(date)))
         b = False
         if date.valid():
-            self.terminationDate = date
+            self.fields[Terms.TDATE] = date
             b = True
         return b
-        
-    ## Returns True if this item has run its expiration date. ~On~ the expiration date is still valid.
-    def expired(self):
-        return self.date > self.terminationDate
     
+    # Used to revive a terminated bill that still exists in the record.
+    # Records are cleared of an expense 1 year after their termination date.
+    def revive(self):
+        self.fields[Terms.TDATE] = None
+        while (self.fields[Terms.DDATE] < program.curDate):
+            self.rollForward()
+
+    # Returns True if this item has run its expiration date. The expiration date is the last date the bill is still valid.
+    def expired(self):
+        return self.fields[Terms.DDATE] > self.fields[Terms.TDATE]
+    
+    # Returns true if the given var represents an instance of Expense (this class)
     def verifyOther(self, other):
         return isinstance(other, Expense)
     
+    # Returns 1 if this object comes logically after the 'other' in ordering, -1 if before, 0 if indeterminate.
     def compare(self, other):
         if not verifyOther(other):
             raise TypeError("expected {} object, recieved {}".format(type(self), type(other)))
-        val = self.date.compare(other.date)
-        if val == 0: val = 1 if self.amount > other.amount else (-1 if self.amount < other.amount else o)
-        if val == 0: val = 1 if self.name > other.name else (-1 if self.name < other.name else 0)
+        val = self.fields[Terms.DDATE].compare(other.fields[Terms.DDATE])
+        if val == 0: val = 1 if self.fields[Terms.AMOUNT] > other.fields[Terms.AMOUNT] else (-1 if self.fields[Terms.AMOUNT] < other.fields[Terms.AMOUNT] else o)
+        if val == 0: val = 1 if self.fields[Terms.NAME] > other.fields[Terms.NAME] else (-1 if self.fields[Terms.NAME] < other.fields[Terms.NAME] else 0)
         return val
     
+    # Returns 
     def clone(self):
         e = Expense(self.name, self.amount, self.payperiod, self.date.clone(), self.important)
         e.terminationDate = self.terminationDate.clone()
         return e
-    
-    def valid(self):
-        b = False
-        if (self.name != "" and
-            self.amount >= 0 and
-            self.payperiod >= Constants.Budget and
-            self.payperiod <= Constants.Annually and
-            self.date.valid()) and 
-            (self.terminationDate == None or
-             self.terminationDate.valid())):
-            b = True
-        return b
 
 class Income(Expense):
     
@@ -483,14 +506,22 @@ class Period(Enum):
     BiWeekly = 3
     Monthly = 4
     Annually = 5
+
+    # Return true
+    def valid(n):
+        if type(n) != int:
+            raise Exception("Cannot validate parameter against enum values with {}".format(type(n)))
+        return (within(n, 1, len(Period)))
     
-class Month
+class Month:
     maximum = 12
     minimum = 1
     daysMax = 31
     daysMin = 1
-    names =   ['Nul', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    lengths = [    0,    31,    28,    31,    30,    31,    30,    31,    31,    30,    31,    30,    31]
+    names =   {0:'Nul', 1:'Jan', 2:'Feb', 3:'Mar', 4:'Apr', 5:'May', 6:'Jun', 7:'Jul', 8:'Aug', 9:'Sep', 10:'Oct', 11:'Nov', 12:'Dec'}
+    lengths = {self.names[0]:0, self.names[1]:31, self.names[2]:28, self.names[3]:31, self.names[4]:30, self.names[5]:31,
+               self.names[6]:30, self.names[7]:31, self.names[8]:31, self.names[9]:30, self.names[10]:31, self.names[11]:30,
+               self.names[12]:31}
     
     def name(numeral):
         if numeral < 1 or numeral > maximum:
@@ -500,7 +531,19 @@ class Month
     def length(numeral):
         if numeral < 1 or numeral > maximum:
             raise OverflowError("Value given is out of bounds; recieved {}".format(numeral))
-        return length[numeral]
+        return length[names[numeral]]
+
+class Terms:
+    self.NAME = "Nm"
+    self.ID = "ID"
+    self.AMOUNT = "Amt"
+    self.DDATE = "DD"
+    self.TDATE = "TD"
+    self.PERIOD = "P"
+    self.IMPORTANT = "I"
+
+def within(n, min, max):
+    return (n >= min and n <= max)
 
 ## Here's the epics:
 program = Program()
