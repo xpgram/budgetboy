@@ -218,25 +218,22 @@ class Program:
 class Expense:
 
     ## Rewrite
+    # I think I'm done here... I need to finish writing Program, now.
 
-    ## Expense (and the other classes too, for that matter) is going to use a dictionary for
-    ## its fields instead of declared variables.
-    ## Load uses Expense() with no parameters, so fix the constructor.
-    ## Add a method which adds all the necessary fields in one action; perhaps taking a dict as
-    ##    a parameter and simply verifying it has all the right contents.
-    ## Add or reform the valid() method to confirm the expense object isn't empty and useless,
-    ##    particularly because Expense() is now a valid call.
+    # For reference:
+    # Fields: name, id, amount, ddate, tdate, payperiod, important
 
-    # Fields: name, id, amount, ddate, payperiod, tdate, important
-
+    ## Program will have to assign IDs to expense and income objects;
+    ## each one needs to be unique, there's no way to verify that without access to the global list.
     # id, in case I forget, is calculated thusly:
     #     01 -- 99 (in order of creation), + 1 random digit.
     #     ex: 017 023 039 041
     # The extra digit helps prevent accidental reference, I pretend is the reason.
     # These id's are saved in the record, and become each item's "second name" for ease of use purposes.
 
-    def __init__(self):
-        self.fields = {}
+    def __init__(self, fields={}}):
+        self.fields = fields
+        
         
     # Returns true if all required fields are filled in and with correct data.
     def valid(self):
@@ -270,7 +267,11 @@ class Expense:
 
     # Returns this expense's amount as a string in currency format
     def amountStr(self):
-        return '-$' + str(self.fields[program.AMOUNT])
+        return '-$' + str(self.fields[Terms.AMOUNT])
+
+    # Returns this expense's amount as an int
+    def amount(self):
+        return self.fields[Terms.AMOUNT]
     
     # Rolls the due-date forward by one payperiod.
     # 'budgetboy -p [name|id]' or 'budgetboy -rf [name|id]' do this as well, if the bill has been payed.
@@ -317,26 +318,32 @@ class Expense:
         if val == 0: val = 1 if self.fields[Terms.NAME] > other.fields[Terms.NAME] else (-1 if self.fields[Terms.NAME] < other.fields[Terms.NAME] else 0)
         return val
     
-    # Returns 
+    # Returns a copy of this instance.
     def clone(self):
-        e = Expense(self.name, self.amount, self.payperiod, self.date.clone(), self.important)
-        e.terminationDate = self.terminationDate.clone()
+        e = Expense()
+        for term in Terms:
+            e.fields[term] = self.fields[term]
+        e.fields[Terms.DDATE] = self.fields[Terms.DDATE].clone()
+        e.fields[Terms.TDATE] = self.fields[Terms.TDATE].clone()
         return e
 
 class Income(Expense):
     
+    # Returns this income's amount as a string in currency format
     def string(self):
-        return '+$' + str(self.amount)
+        return '+$' + str(self.fields[Terms.AMOUNT])
     
-    def amount(self):
-        return self.amount
-    
+    # Verifies that the given object is an Income object
     def verifyOther(self, other):
         return isinstance(other, Income)
     
+    # Returns a copy of this instance.
     def clone(self):
-        i = Income(self.name, self.amount, self.payperiod, self.date.clone(), self.important)
-        i.terminationDate = self.terminationDate.clone()
+        i = Income()
+        for term in Terms:
+            i.fields[term] = self.fields[term]
+        i.fields[Terms.DDATE] = self.fields[Terms.DDATE].clone()
+        i.fields[Terms.TDATE] = self.fields[Terms.TDATE].clone()
         return i
     
 class DueDate:
@@ -542,8 +549,13 @@ class Terms:
     self.PERIOD = "P"
     self.IMPORTANT = "I"
 
+# Returns true if n is in the interval min to max, inclusive
 def within(n, min, max):
     return (n >= min and n <= max)
+
+# Retruns true if n is in the interval min to max, exclusive
+def between(n, min, max):
+    return (n > min and n < max)
 
 ## Here's the epics:
 program = Program()
