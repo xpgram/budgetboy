@@ -131,16 +131,19 @@ class Program:
                 e.fields[Terms.PERIOD] = Period.fromString(e.fields[Terms.PERIOD])
                 e.fields[Terms.IMPORTANT] = (e.fields[Terms.IMPORTANT] == "True")
             except ValueError:
-                pass    # TODO This should never happen, but it would be cool if I passed this object to
-                        # a list of misfits, and then displayed that list of troublemakers to the user.
+                print(">> " + e.fields[Terms.DDATE] + " : " + e.fields[Terms.NAME] + " : " + e.fields[Terms.AMOUNT])
+                raise Exception("This object did not read correctly from memory. Check datafile for corruption?")
+                    # TODO This should never happen, but it would be cool if I passed this object to
+                    # a list of misfits, and then displayed that list of troublemakers to the user,
+                    # which is ~kind of~ what I'm doing here, I suppose.
             
             # Verify the object, and add it to memory
             if e.valid():
                 self.IDs.append(e.fields[Terms.ID])
                 program.budgetItems.append(e)
             else:
-                raise Exception("Data is corrupt; one of the read items did not validate correctly.")
-                # TODO Same as the above: pass it to a list, present the list of troublemakers
+                print(">> " + e.display())
+                raise Exception("Data is corrupt; this item did not validate correctly.")
         
         # Finish
         f.close()
@@ -215,6 +218,77 @@ class Program:
         # I hope not too many.
         # The basic 'listadd' , 'listdisplay' functionality ought to be easy enough.
 
+        # no input:     display
+        # add "name" amount date (optional)period (optional)important
+        # new "name" amount date (optional)period (optional)important
+        # -a "name" amount date (optional)period (optional)important
+        #           amount is assumed to be an expense (typing +amount forces income, or use addi)
+        #           date format is MM-DD-YYYY       if year and month are left out, curYear/curMonth are assumed
+        #           period is [s w b m a] or singular/one-time/once, weekly/7, biweekly/bi-weekly/14, monthly/""(default), annually/yearly
+        #           important is false by default, but passing '*' or 'important' or 'always-show' will enable it
+        # addi "name" amount date (optional)period (optional)important
+        #           forces +amount. for consistency, I guess, passing '-[amount]' will force expense
+        # rem [ID]
+        # -r [ID]
+        #           Removes the ID'd bill (or income) from the database
+        # payed [ID]
+        # -p [ID]
+        #           "pays" the ID'd bill (or income; they're the same object)
+        #           All this actually does is roll the object's DDate one period back
+        # terminate [ID] [DATE]
+        # -t [ID] [DATE]
+        #           Adds (or updates) a TDATE for the object with the given ID
+        # important [ID]
+        # -i [ID]
+        #           Toggles the IMPORTANT flag for an ID'd object
+        #           Mostly a just-in-case feature for when I forget to add it while creating a new entry.
+        # name [ID] "name"
+        # -n [ID] "name"
+        #           Changes the name of an ID'd object. Occasionally useful.
+        # amount [ID] [amount]
+        # -m [ID] [amount]
+        #           Updates the amount of an ID'd object. Mostly useful when companies raise my bills.
+        #           I do not have a "schedule price change on DATE" feature, and I'm not sure I want to bother.
+        # proj MM-DD-YY
+        # proj 6m 3d 2y
+        #           displays a net-income projection for either the specified amount of time, or until the given date.
+        #           a projection is always displayed, this just modifies the projection period
+        #           the table that always prints below the upcoming month will just project farther (or shorter?)
+        #           than usual.
+        # list
+        # listall
+        # -l
+        #           displays all expense objects recorded in DB, organized by amount then by name
+        #           expired items are always sorted to the bottom, but then by amount and name
+        #           [ID]  [Name]                    [**]  [AmountStr]   [Period]  [DDATE]  [TDATE if present]
+        # list "string"
+        # -l "string"
+        #           like the above, but searches the list for the given string.
+        #           if string is an ID, it is highly likely to only return one item
+        #           string searches through IDs first, as they are most relevant,
+        #           then searches again through each item's name for an equivalent substring
+
+        # The features listed above, the only properties that do not have update functions are ID, PERIOD and DDATE
+        # This is because IDs never change, PERIODs should change by creating a new bill (I guess),
+        # and DDATEs are handled internally (advanced by their period).
+        # More specifically (DDATEs), DDATEs are not likely to change; I've never heard of a company sending
+        # an email that "in June your bill will begin being processed on the 13th of every month".
+        # It's just an unnecessary feature.
+        # A paycheck changing date probably has something to do with a job change, etc., so should be a new item.
+
+        # A thought: what about monthly periods like "3rd Thu of the Month"?
+        # I'm not concerned, but still. Depends on how monthly salaries are distributed, really. I have no idea.
+
+        # If I add Luxury tallying:
+        #   these items do not need IDs, they are one-time payments, usually entered the day of,
+        #   and are only meant to add up against the month's net total. They should still have a date attached.
+
+        # Also, I forgot to consider monthly budgets.
+        #   'Food', for instance, does not have a DDATE, but should count against net totals per month.
+        #   I'll have to consider how to model this.
+        #   I think if I set 'budgeted' as a flag, I can choose to ignore the DATE object (but still have one),
+        #   and I can roll the item forward by any Period (maybe 'Food' is bi-weekly, huh?)
+
     ## Generates a new ID for a new income/expense object.
     def newID(self):
         if len(self.IDs) < 999:
@@ -229,6 +303,10 @@ class Program:
             return "{:03d}".format(newID)
         else:
             raise Exception("There are no available IDs to give out; update code to allow 4 digits?")
+
+    ## Returns a string of '=' equal in length to the width of the display area
+    def horizontalRule(self):
+        return '='*57       # TODO Update this? 57 I think should be accurate.
 
 class Expense:
 
