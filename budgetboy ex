@@ -23,15 +23,15 @@ Mar 15, 2019                                                The current date
 Itemized Budget (Mar)                                       Maybe start projecting Apr after Mar 25th
 =========================================================
 561  x2   Paycheck                                 +$1800   This rolls back the clock to (this month) 1st
-050  x1   Dominion National Teeth Insurance          -$20
-774  x1   Google Play                                -$10
-017  --   Food                                      -$100
-314  x1   HBO Now                                    -$15
+050  x1   Dominion National Teeth Insurance          -$20   And runs it through (this month)'s end
+774  x1   Google Play                                -$10   
+017  --   Food                                      -$100   Tallies expense occurrences, total expent,
+314  x1   HBO Now                                    -$15   and displays it inline.
 432  x1   Loan: The Tech Academy                    -$240
 528  x1   Loan: Laptop                               -$55
-131  x1   Netflix                                    -$12   And runs it through (this month)'s end
-188  x1   Providence H.Insurance                    -$116   Tallying up the points.
-887  x1   Rent                                      -$300   Aside: Clock rollback only goes back 1 year for non-recurring payments.
+131  x1   Netflix                                    -$12
+188  x1   Providence H.Insurance                    -$116
+887  x1   Rent                                      -$300
 378  --   Transportation                            -$160
      x4   Luxury                                    -$140   Luxury counts all labels 'Luxury' and totals them (x4 in this case means 4 occurences, not 4 payments of $140)
   
