@@ -7,6 +7,10 @@ from enum import Enum
 ## Also, rewrite expense and the other classes to use dictionaries for fields; since I'm using
 ## them for saving/loading anyway, it's more concise.
 
+## TODO Make sure save() backups the old file somewhere.
+## TODO Get it to print a list of bills.
+## TODO Get it to interpret commands, such as 'add' and 'rem'
+
 class Program:
     
     self.separatorChar = '`'
@@ -76,68 +80,6 @@ class Program:
         for item in budgetItems:
             while item.date < curDate:
                 item.advancePeriod()
-        
-        ## Sort list
-        if len(budgetItems) > 1:
-            for i in range(1, len(budgetItems)):
-                k = i
-                j = i - 1
-                while j > -1 and budgetItems[k].compare(budgetItems[j]) == -1:
-                    tmp = budgetItems[j]
-                    budgetItems[j] = budgetItems[k]
-                    budgetItems[k] = tmp
-                    j -= 1
-                    k -= 1
-        
-        ## Via user argumentative input, do something
-        ## Show some kind of feedback on the thing
-        
-                ## This is the part where I am currently.
-                ## My head is too.. sleepy to continue.
-                ## I may need a nap.
-                ## But! (fuck fuck fuck..) I have to call my Dad ~and~ I have to visit my friend.
-                ## So... shit.
-                
-                ## Todo:
-                ## Clean up the program class, jesus christ.
-                ## That means:
-                ##      Separate the different parts of run() into their own methods
-                ##      Rewrite save and load so that they aren't... retarded.
-                ##          Get expenses to save() themselves, maybe
-                ##      Maybe confirm any of this works
-        
-        ## Save and exit
-        f = file.open(datafilePath, 'w')
-        
-        e = '`' ## For 'escape char' which actually doesn't make sense, should be 'separator'
-        for expense in budgetItems:
-            ddate = expense.date
-            tdate = expense.terminationDate
-            s = ""
-            if ddate == None:
-                s += '--'
-            else:
-                s += str(ddate.day)
-                s += e + str(ddate.month)
-                s += e + str(ddate.year)
-                if ddate.duedate == None:
-                    s += e + '--'
-                else:
-                    s += e + str(s.duedate)
-            s += e + expense.name
-            s += e + str(expense.amount)
-            s += e + expense.payperiod.name
-            s += e + str(1 if expense.important else 0)
-            if tdate == None:
-                s += e + '--'
-            else:
-                s += e + str(tdate.day)
-                s += e + str(tdate.month)
-                s += e + str(tdate.year)
-            
-            f.write(s + '\n')
-        
-        f.close()
     
     ## Searchable: [Main() Rewrite]
 
@@ -157,7 +99,7 @@ class Program:
 
         ## Write each budget item as a line, following the format of the header fields, using the separator char.
         for b in budgetItems:
-            for key in b.fields:
+            for key in program.header:
                 f.write(b.fields[key] + program.separatorChar)
             f.write("\n")
         
@@ -178,7 +120,7 @@ class Program:
         ## verify its terms are.. correct?
         if line:
             for h in program.header:
-                if not line.find(h):
+                if not line.find(h):    # TODO I guess I should demand they also be the only fields... I dunno.
                     raise Exception("File appears to be corrupt: file content does not match expected format.")
         
         ## Break the header line into discrete pieces
@@ -204,16 +146,34 @@ class Program:
             # Reconfigure strings into integers ~if possible~
             # TODO This should probably be done ~in~ the Expense object.
             try:
-                e.fields[program.AMOUNT] = int(e.fields[program.AMOUNT])
+                e.fields[Terms.AMOUNT] = int(e.fields[Terms.AMOUNT])
             except ValueError:
                 pass
             
             # Verify the object, and add it to memory
-            if e.hardValidate():
+            if e.validate():    # .hardValidate()
                 program.budgetItems.append(e)
+            else
+                raise Exception("Data is corrupt; one of the read items did not validate correctly.")
 
             # TODO Add .hardValidate() to Expense objects; raise an error when data doesn't conform.
             # This method will confirm the right kind of data, the right number of fields, etc.
+        
+        # Finish
+        f.close()
+    
+    ## Sort list
+    def sort(self):
+        if len(budgetItems) > 1:
+            for i in range(1, len(budgetItems)):
+                k = i
+                j = i - 1
+                while j > -1 and budgetItems[k].compare(budgetItems[j]) == -1:
+                    tmp = budgetItems[j]
+                    budgetItems[j] = budgetItems[k]
+                    budgetItems[k] = tmp
+                    j -= 1
+                    k -= 1
 
 class Expense:
 
