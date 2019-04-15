@@ -8,7 +8,6 @@ from enum import Enum
 ## Also, rewrite expense and the other classes to use dictionaries for fields; since I'm using
 ## them for saving/loading anyway, it's more concise.
 
-## TODO Make sure save() backups the old file somewhere.
 ## TODO Get it to print a list of bills.
 ## TODO Get it to interpret commands, such as 'add' and 'rem'
 
@@ -205,6 +204,7 @@ class Program:
     ## Interprets the user's arguments to the program as actionable.. actions.
     def userInput(self):
         pass
+        # TODO bby wrk on ths
         # I am going to bed.
         # This thing is finally almost done for real now.
         # The last thing to do (and I really think the logic is fine--no errors) is to
