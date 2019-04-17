@@ -220,10 +220,6 @@ class Program:
 
         # no input:     display
         
-        # payed [ID]
-        # -p [ID]
-        #           "pays" the ID'd bill (or income; they're the same object)
-        #           All this actually does is roll the object's DDate one period back
         # terminate [ID] [DATE]
         # -t [ID] [DATE]
         #           Adds (or updates) a TDATE for the object with the given ID
@@ -244,12 +240,6 @@ class Program:
         #           a projection is always displayed, this just modifies the projection period
         #           the table that always prints below the upcoming month will just project farther (or shorter?)
         #           than usual.
-        # list
-        # listall
-        # -l
-        #           displays all expense objects recorded in DB, organized by amount then by name
-        #           expired items are always sorted to the bottom, but then by amount and name
-        #           [ID]  [Name]                    [**]  [AmountStr]   [Period]  [DDATE]  [TDATE if present]
         # list "string"
         # -l "string"
         #           like the above, but searches the list for the given string.
@@ -295,19 +285,36 @@ class Program:
             self.d_itemizedProjection(start, end)
 
         elif len(argv) >= 2:
+            # Add a new expense object
             if (argv[1] == 'add' or
                 argv[1] == 'new' or
                 argv[1] == '-a'):
                 self.addItem()
 
+            # Add a new 'income' object
             elif (argv[1] == 'addi' or
                   argv[1] == 'newi' or
                   argv[1] == '-ai'):
                 self.addItem(True)
 
+            # Remove an expense object by its ID
             elif (argv[1] == 'rem' or
                   argv[1] == '-r'):
                 self.removeItem()
+
+            # Roll an expense object's date forward, by its ID
+            elif (argv[1] == 'payed' or
+                  argv[1] == '-p'):
+                self.advanceItemDate()
+
+            # List items in the budget by a given string, or list all
+            elif (argv[1] == 'list' or
+                  argv[1] == '-l'):
+                self.listItems()
+            
+            # List all items in the budget
+            elif (argv[1] == 'listall'):
+                self.listAll()
 
     ## Adds a new expense object to the global list
     # 'income' determines the sign of the amount field, and is for the command addi specifically.
@@ -372,9 +379,9 @@ class Program:
 
         try:
             amt = int(s)
-            log('amt = ' + str(amt))
         except ValueError:
             print("Item could not be added: the amount integer could not be parsed.")
+            print()
             exit()
         
         amt = abs(amt)  # I dunno. Users are weird.
@@ -400,9 +407,11 @@ class Program:
             date.fromString(s)
         except ValueError:
             print("Item could not be added: the date integers could not be parsed.")
+            print()
             exit()
         except Exception:
             print("Item could not be added: date object did not fit MM-DD-YYYY")
+            print()
             exit()
         
         return date
@@ -439,25 +448,141 @@ class Program:
         # Assert argument length
         if not self.assertArgNum(3):
             print('Could not delete item: malformed request.')
+            print()
             exit()
         
-        item = None
-
-        # Find and delete the item
-        for i in range(0, len(self.budgetItems)):
-            if self.budgetItems[i].fields[Terms.ID] == argv[2]:
-                item = self.budgetItems[i]
-                self.budgetItems.pop(i)
-                break
+        item, idx = self.searchByID(argv[2])
 
         # Inform the user
         if item:
+            self.budgetItems.pop(idx)
             print(item.displayStr())
             print("This item has been deleted.")
         else:
             print("An item with the ID " + argv[2] + " could not be found.")
         print() # Final spacer
 
+    ## Advances a budget item's date, item targeted by its ID
+    def advanceItemDate(self):
+        # payed [ID]
+        # -p [ID]
+        #           "pays" the ID'd bill (or income; they're the same object)
+        #           All this actually does is roll the object's DDate one period back
+        if not self.assertArgNum(3):
+            print('Could not advance item date: malformed request.')
+            print()
+            exit()
+        
+        item, idx = self.searchByID(argv[2])
+        
+        # Inform the user, and also do the thing
+        if item:
+            oldDate = item.fields[Terms.DDATE].clone()
+            item.rollForward()
+            newDate = item.fields[Terms.DDATE].clone()
+            itemID = item.fields[Terms.ID]
+            itemName = item.fields[Terms.NAME]
+            # Why am I doing this?
+            print(itemID + "  " + itemName + "    : " + oldDate.get() + " --> " + newDate.get())
+        else:
+            print("An item with the ID " + argv[2] + " could not be found.")
+        print() # Final spacer
+
+    ## Lists all items in the budget so long as they contain a search string
+    def listItems(self):
+        if self.assertArgNum(2):
+            self.listAll()
+            return
+        
+        expenses = self.copyList()
+        expenses = self.sortList(expenses)
+        successful = False
+
+        # Display any items which match any argv[idx] with idx >= 2
+        for exp in expenses:
+            match = False
+
+            for i in range(2, len(argv)):
+                if exp.fields[Terms.ID] == argv[i]:
+                    match = True
+                    break
+                if exp.fields[Terms.NAME].lower().find(argv[i].lower()) != -1:
+                    match = True
+                    break
+            
+            if match:
+                print(exp.displayAllStr())
+                successful = True
+        
+        # If a list was produced, do nothing, but if one wasn't, apologize profusely
+        if not successful:
+            print("No items found.")
+
+        print() # Final spacer
+
+    ## Lists all items in the budget
+    def listAll(self):
+        if not self.assertArgNum(2):
+            print("Too many arguments: did you mean to do something different?")
+            print()
+            exit()
+
+        expenses = self.copyList()
+        expenses = self.sortList(expenses)
+        
+        for item in expenses:
+            print(item.displayAllStr())
+        print()
+
+    ## Sort a list of Expense objects by expiry, then by amount, then name
+    # This sort method has a different result and a different use case from self.sort()
+    def sortList(self, ls):
+        # Deep copy
+        expenses = []
+        for i in ls:
+            expenses.append(i.clone())
+
+        # Sort
+        for i in range(1, len(expenses)):
+            k = i
+            j = i - 1
+
+            # The block I have down there.
+            # I know.
+            # My head hurts right now.
+            # I wish it weren't so stupid.
+            # TODO Make it not stupid.
+            while j > -1:
+                swap = False
+                # Expired items filter to the bottom
+                if expenses[j].expired() and not expenses[k].expired():
+                    swap = True
+                elif not expenses[j].expired() and expenses[k].expired():
+                    swap = False
+                # Positive items filter to the top
+                elif expenses[j].amount() < 0 and expenses[k].amount() >= 0:
+                    swap = True
+                elif expenses[j].amount() >= 0 and expenses[k].amount() < 0:
+                    swap = False
+                # Smaller amounts filter to the bottom
+                elif abs(expenses[j].amount()) < abs(expenses[k].amount()):
+                    swap = True
+                elif abs(expenses[j].amount()) > abs(expenses[k].amount()):
+                    swap = False
+                # Sort remaining alphabetically
+                elif expenses[j].fields[Terms.NAME] > expenses[k].fields[Terms.NAME]:
+                    swap = True
+                
+                if swap:
+                    tmp = expenses[k]
+                    expenses[k] = expenses[j]
+                    expenses[j] = tmp
+                
+                j = j - 1
+                k = k - 1
+
+        # Done
+        return expenses
 
     ## Displays an at-a-glance of the coming bills (within 30 days)
     # timeLength should be a Time object
@@ -577,6 +702,30 @@ class Program:
             return "{:03d}".format(newID)
         else:
             raise Exception("There are no available IDs to give out; update code to allow 4 digits?")
+    
+    ## Searches for a given ID, returning the object and its index, or [None, None] if it could not be found
+    def searchByID(self, s):
+        # Make sure search string is correct
+        try:
+            int(s)
+            if len(s) != 3:
+                raise Exception()
+        except Exception:
+            print("Search ID is malformed, cannot complete.")
+            print()
+            exit()
+        
+        item = None
+        idx = None
+
+        # Perform the search
+        for i in range(0, len(self.budgetItems)):
+            if self.budgetItems[i].fields[Terms.ID] == s:
+                item = self.budgetItems[i]
+                idx = i
+        
+        # Be careful not to accept None as a result
+        return item, idx
 
     ## Deep copies the expense list and returns it
     def copyList(self):
@@ -659,13 +808,30 @@ class Expense:
     def displayStr(self):
         s = '' + self.fields[Terms.ID] + '  '
         s = s + self.fields[Terms.DDATE].get(self.lastPayment()) + ' '
-        s = s + '{:35.35}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ')
-        s = s + ('  ') + "{:>8}".format(self.amountStr())
+        s = s + '{:35.35}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ') + '  '
+        s = s + "{:>8}".format(self.amountStr())
         return s
 
     @staticmethod
     def displayWidth():
         return 61       # Would be nice, I guess, to calculate this.
+
+    ## Returns a formatted line containing all the information this object has
+    def displayAllStr(self):
+        period = "One-Time"
+        if self.fields[Terms.PERIOD] != Period.Singular:
+            period = self.fields[Terms.PERIOD].name
+
+        s = '' + self.fields[Terms.ID] + '  '
+        s = s + '{:35.35}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ') + '  '
+        s = s + "{:>8}".format(self.amountStr()) + '  '
+        s = s + "{:8}".format(period) + '  '
+        s = s + self.fields[Terms.DDATE].getFull(self.lastPayment())
+
+        if self.fields[Terms.TDATE] != None:
+            s = s + ' x  ' + self.fields[Terms.TDATE].getFull()
+
+        return s
 
     # Returns this expense's amount as a string in currency format
     def amountStr(self):
@@ -706,6 +872,8 @@ class Expense:
 
     # Returns True if this item has run its expiration date. The expiration date is the last date the bill is still valid.
     def expired(self):
+        if self.fields[Terms.TDATE] == None:
+            return False
         return self.fields[Terms.DDATE] > self.fields[Terms.TDATE]
 
     # Returns true if this is the last occurrence of this payment, meaning the next period interval lies
@@ -912,7 +1080,9 @@ class DueDate:
         return string
     
     def getFull(self, star=False):
-        string = self.get() + ', ' + str(self.year)
+        string = self.get()
+        string = string[0:len(string)-1]        # Remove trailing space from get()
+        string = string + ', ' + str(self.year)
         if star: string += '*'
         else: string += ' '
         return string
