@@ -329,6 +329,11 @@ class Program:
             elif (argv[1] == 'listall'):
                 self.listAll()
 
+            # Default case
+            else:
+                print('Actionable command not understood: ' + argv[1])
+                print()
+
     ## Adds a new expense object to the global list
     # 'income' determines the sign of the amount field, and is for the command addi specifically.
     def addItem(self, income=False):
