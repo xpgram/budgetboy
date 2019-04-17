@@ -958,7 +958,8 @@ class Expense:
     # Rolls the due-date forward by one payperiod.
     # 'budgetboy -p [name|id]' or 'budgetboy -rf [name|id]' do this as well, if the bill has been payed.
     def rollForward(self):
-        self.fields[Terms.DDATE] = self.fields[Terms.DDATE].advancePeriod(self.fields[Terms.PERIOD])
+        if not self.expired():
+            self.fields[Terms.DDATE] = self.fields[Terms.DDATE].advancePeriod(self.fields[Terms.PERIOD])
     
     # Rolls the due-date backward by one payperiod.
     # This function does not take into account real bill history, it only projects backward in time.
@@ -1015,7 +1016,8 @@ class Expense:
     def compare(self, other):
         if not self.verifyOther(other):
             raise TypeError("expected {} object, recieved {}".format(type(self), type(other)))
-        val = self.fields[Terms.DDATE].compare(other.fields[Terms.DDATE])
+        val = 1 if self.expired() and not other.expired else (-1 if not self.expired and other.expired else 0)
+        if val == 0: val = self.fields[Terms.DDATE].compare(other.fields[Terms.DDATE])
         if val == 0: val = 1 if self.fields[Terms.AMOUNT] > other.fields[Terms.AMOUNT] else (-1 if self.fields[Terms.AMOUNT] < other.fields[Terms.AMOUNT] else 0)
         if val == 0: val = 1 if self.fields[Terms.NAME] > other.fields[Terms.NAME] else (-1 if self.fields[Terms.NAME] < other.fields[Terms.NAME] else 0)
         return val
