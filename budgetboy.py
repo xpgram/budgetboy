@@ -232,6 +232,11 @@ class Program:
         # TODO bby wrk on ths
         # Implement Feature List:
 
+        ## Expand ID Ranges
+        # From 001 - 999 to 0001 - 9999
+        # ~10,000 entries ought to be enough for all the extraneous purchases I make.
+        # Especially because I don't ~know~ that they would fill up 1,000 entries either.
+
         ## Refactor
         # I repeat myself a lot, particularly in class Program.
         # Non-violent errors, like a malformed user request, should print a message with an exitProgram() method.
