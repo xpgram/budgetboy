@@ -1,15 +1,11 @@
 import sys
+import os
 import random
 from datetime import date
 from datetime import datetime
 from enum import Enum
 
-## Search 'Rewrite' for whatever I was doing earlier
-## Also, rewrite expense and the other classes to use dictionaries for fields; since I'm using
-## them for saving/loading anyway, it's more concise.
-
-## TODO Get it to print a list of bills.
-## TODO Get it to interpret commands, such as 'add' and 'rem'
+## Search 'TODO' for tasks that need completin' or considerin'
 
 # Globals
 argv = sys.argv
@@ -25,9 +21,17 @@ class Program:
         self.IDs = []
         self.budgetItems = []
 
-        # TODO Make this a relative path
-        # Relative to the script's source location, anyway
-        self.datafilePath = "C:\\Users\\xpgra\\Home\\Scripts\\Data\\budgetboy_data"
+        # TODO This only works for windows, currently
+        # Attempt to create the userdata directory, if one doesn't already exist.
+        datafolderPath = "%LOCALAPPDATA%\\budgetboy"
+        datafolderPath = os.path.expandvars(datafolderPath)
+        try:
+            os.mkdir(datafolderPath)
+        except OSError:
+            pass
+        
+        # The path to the program's datafile
+        self.datafilePath = datafolderPath + "\\budgetboy_data"
         
     def run(self):
         print()             # First spacer, separates the shell command line from the output
@@ -226,47 +230,106 @@ class Program:
     ## Interprets the user's arguments to the program as actionable.. actions.
     def userInput(self):
         # TODO bby wrk on ths
+        # Implement Feature List:
 
-        # I have updated the features!
-        # As far as I can tell, this baby is fully up and running with no side effects!
+        ## Refactor
+        # I repeat myself a lot, particularly in class Program.
+        # Non-violent errors, like a malformed user request, should print a message with an exitProgram() method.
+        # Common messages, like [ID]  [Name]  [Field_old] --> [Field_new] should have a standard method()
+        # Add a save? boolean which prevents saving when something goes wrong, and then
+        # try to keep exiting in the middle of the program to a minimum.
+
+        ## Itemized Budget Display
+        # I think I will rescind its presence on the default view.
+        # But, when projecting over a long period of time, this view compacts the view-space.
+        # Something over 45-days should auto-pick this display type.
+
+        ## Allow User/Program to Project from DATE to DATE
+        # the 'proj' command accepts date and time arguments
+        # allow the user to separate them with the word 'to'
+        # Configure the projection-display method to take in two dates, one of them defaulting to the current date.
+
+        ## Itemized Budget Display is used for Date-to-Date projections
+        # When showing a list of what happened in Apr, or from 2019 to 2020, use the Itemized Display.
+        # This necessarily refers to projections which roll the clock to any time before or after the current day.
+
+        ## Add Savings Accounts
+        # Financial Events (Expense Objects) can be linked to these accounts
+        # Financial Events apply the negative of their amounts to whichever accounts they are linked to
+        # They apply the negative because their actual amounts are considered additions to and from the net-total per period
+        # A 'Savings Deposit' has the value -$100 FROM the net-total, but a +$100 to the savings account
+        # This will specifically be handled in the update() and payItem() methods so as not to affect the projection feature
+        # I may use a link-table, event IDs to accounts IDs (which share the 0-999 ID space) to achieve this simply
+        # Otherwise, I can add a new field to Expense objects; events probably(?) shouldn't link to more than one account anyway.
         #
-        # That is, except for no projection features.
-        # I am not willing to work on that ~right now~, partly because I spent ~12 hours finishing this thing,
-        # and all that time I was ~supposed~ to be studying.
+        # Purpose:
+        #   General Savings <-- Monthly Savings Deposit
+        #   New Computer Savings <-- New Computer Savings Deposit
+        #   New Computer Savings --> New Computer Purchase*
         #
-        # Details are below, or far below somewhere, I'm sure, but the gist is this:
-        #   Default view has an itemized budget for the month feature
-        #   An itemized budget for any period should also be creatable
-        #   The user can do this with the proj command
-        #   These mostly project from the current day
-        #   I'm not sure if there's any reason to proj from a different day. Per se. Ergo. Vis a vis. Concordantly.
-        # Those are the details. Know them. Work them. Serve them. Fuck you.
+        # The first 3 listed accounts are displayed below the projections on the default view, or all of them upon request.
+
+        ## Savings Affects Net-Total
+        # At least a default savings account, assumed to exist.
+        # This prevents the acquisition of a paycheck from ceasing to influence the net-total.
+        # The net total, in this case, just builds on itself month after month
+        # Here is a visual of the problem:
+        #   234  Apr 01  Paycheck           +$900
+        #   256  Apr 02  Phonebill          -$500
+        #   411  Apr 03  Teeth Ins.          -$20
+        #                     Net Total     +$380
         #
-        # Oh, also, I don't actually know how this boy handles an empty file anymore.
-        # I thought that it freaked out the last time I tried, and hung in an infinite loop.
-        # So, I dunno, check?
-        #
-        # Oh, and last-thing, last-thing: fix that fucking relative-path problem, god damn.
+        #   256  Apr 02  Phonebill          -$500
+        #   411  Apr 03  Teeth Ins.          -$20
+        #                     Net Total     -$520       This says I'm in the red, but that isn't true.
         
-        # proj MM-DD-YY
-        # proj 6m 3d 2y
-        #           displays a net-income projection for either the specified amount of time, or until the given date.
-        #           a projection is always displayed, this just modifies the projection period
-        #           the table that always prints below the upcoming month will just project farther (or shorter?)
-        #           than usual.
+        ## Add a help screen
+        # budgetboy help
+        # display all the commands
 
+        ## New PayPeriod
         # A thought: what about monthly periods like "3rd Thu of the Month"?
         # I'm not concerned, but still. Depends on how monthly salaries are distributed, really. I have no idea.
 
-        # If I add Luxury tallying:
-        #   these items do not need IDs, they are one-time payments, usually entered the day of,
-        #   and are only meant to add up against the month's net total. They should still have a date attached.
+        ## Luxury Tallying in Itemized Budget Display
+        # Financial events have a new field: the 'luxury' flag
+        # Luxury items are one-time payments, usually entered the day of.
+        # They are only meant to add up against the month's net total.
+        # Their purpose is to account for non-small purchases that may grossly affect my end-of-the-month net totals.
+        # Luxury items have names, but are displayed in aggregate in the Itemized Budget display, like this:
+        #   If I bought 2 video games, expensive chocolate, and a concert ticket, those should be displayed as:
+        #   ---   x4  Luxury                  -$210
 
-        # Also, I forgot to consider monthly budgets.
-        #   'Food', for instance, does not have a DDATE, but should count against net totals per month.
-        #   I'll have to consider how to model this.
-        #   I think if I set 'budgeted' as a flag, I can choose to ignore the DATE object (but still have one),
-        #   and I can roll the item forward by any Period (maybe 'Food' is bi-weekly, huh?)
+        ## Blend Dates Together
+        # To declutter the view-space, do this:
+        #   741  Apr 19  Regular Deposit            -$100
+        #   520  Apr 21* Large Yu-Gi-Oh! Playset   -$1700
+        #   130  May 01  Health Insurance           -$116
+        #   798          Teeth Insurance             -$20
+        #   100          The Tech Academy          -$1750
+        #   454  May 04  Phonebill                   -$96
+        #   333        * Payment to Harry             -$7
+        #
+        # Just blank out the dates we already know. The star at the bottom looks a little silly, but whatevs.
+        
+        ## Estimated Objects
+        # Intended to declutter the view-space
+        # 'Transportation' is not an item which is deducted monthly or weekly, it is deducted in small amounts throughout.
+        # So, display it differently.
+        # The DueDate and Period still help determine when and how these items affect the budget
+        # But they're set aside and shown in aggregate outside of the Bill-Event view
+        # Maybe like this:
+        #   741  Apr 19  Regular Deposit            -$100
+        #   520  Apr 21* Large Yu-Gi-Oh! Playset   -$1700
+        #   130  May 01  Health Insurance           -$116
+        #
+        #   210  Jun 01* The Tech Academy          -$1750       These naturally don't count; they're just reminders
+        #
+        #   131  --- x3  Food                       -$120       These do, though, so that's confusing.
+        #   141  -- x20  Transportation             -$250
+        #   ---  --- x4  Luxury                     -$210
+        #
+        #                     Net Total 30-days:    +$641
 
         if len(argv) < 2:      # If 'budgetboy' is the only argument: Default View
             # Block 1: Display 1-month forward, list all expenses as events
@@ -411,6 +474,7 @@ class Program:
             s = s.replace('-', '', 1)
 
         # Remove one '$' if the user (was stupid enough! Ha! Take that user!) included one
+        # TODO The user can't submit $'s anyway.
         if s.find('$'):
             s = s.replace('$', '', 1)
 
