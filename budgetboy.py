@@ -218,42 +218,31 @@ class Program:
     def userInput(self):
         # TODO bby wrk on ths
 
-        # no input:     display
+        # I have updated the features!
+        # As far as I can tell, this baby is fully up and running with no side effects!
+        #
+        # That is, except for no projection features.
+        # I am not willing to work on that ~right now~, partly because I spent ~12 hours finishing this thing,
+        # and all that time I was ~supposed~ to be studying.
+        #
+        # Details are below, or far below somewhere, I'm sure, but the gist is this:
+        #   Default view has an itemized budget for the month feature
+        #   An itemized budget for any period should also be creatable
+        #   The user can do this with the proj command
+        #   These mostly project from the current day
+        #   I'm not sure if there's any reason to proj from a different day. Per se. Ergo. Vis a vis. Concordantly.
+        # Those are the details. Know them. Work them. Serve them. Fuck you.
+        #
+        # Oh, also, I don't actually know how this boy handles an empty file anymore.
+        # I thought that it freaked out the last time I tried, and hung in an infinite loop.
+        # So, I dunno, check?
         
-        # terminate [ID] [DATE]
-        # -t [ID] [DATE]
-        #           Adds (or updates) a TDATE for the object with the given ID
-        # important [ID]
-        # -i [ID]
-        #           Toggles the IMPORTANT flag for an ID'd object
-        #           Mostly a just-in-case feature for when I forget to add it while creating a new entry.
-        # name [ID] "name"
-        # -n [ID] "name"
-        #           Changes the name of an ID'd object. Occasionally useful.
-        # amount [ID] [amount]
-        # -m [ID] [amount]
-        #           Updates the amount of an ID'd object. Mostly useful when companies raise my bills.
-        #           I do not have a "schedule price change on DATE" feature, and I'm not sure I want to bother.
         # proj MM-DD-YY
         # proj 6m 3d 2y
         #           displays a net-income projection for either the specified amount of time, or until the given date.
         #           a projection is always displayed, this just modifies the projection period
         #           the table that always prints below the upcoming month will just project farther (or shorter?)
         #           than usual.
-        # list "string"
-        # -l "string"
-        #           like the above, but searches the list for the given string.
-        #           if string is an ID, it is highly likely to only return one item
-        #           string searches through IDs first, as they are most relevant,
-        #           then searches again through each item's name for an equivalent substring
-
-        # The features listed above, the only properties that do not have update functions are ID, PERIOD and DDATE
-        # This is because IDs never change, PERIODs should change by creating a new bill (I guess),
-        # and DDATEs are handled internally (advanced by their period).
-        # More specifically (DDATEs), DDATEs are not likely to change; I've never heard of a company sending
-        # an email that "in June your bill will begin being processed on the 13th of every month".
-        # It's just an unnecessary feature.
-        # A paycheck changing date probably has something to do with a job change, etc., so should be a new item.
 
         # A thought: what about monthly periods like "3rd Thu of the Month"?
         # I'm not concerned, but still. Depends on how monthly salaries are distributed, really. I have no idea.
@@ -306,6 +295,28 @@ class Program:
             elif (argv[1] == 'payed' or
                   argv[1] == '-p'):
                 self.advanceItemDate()
+
+            # Add a termination date to an object, by its ID
+            elif (argv[1] == 'terminate' or
+                  argv[1] == 'term' or
+                  argv[1] == '-t'):
+                self.terminateItem()
+
+            # Toggles an expense object's 'important' flag, by ID
+            elif (argv[1] == 'important' or
+                  argv[1] == 'star' or
+                  argv[1] == '-i'):
+                self.toggleItemImportance()
+
+            # Changes the name of an expense object, by ID
+            elif (argv[1] == 'name' or
+                  argv[1] == '-n'):
+                self.changeItemName()
+            
+            elif (argv[1] == 'amount' or
+                  argv[1] == 'amt' or
+                  argv[1] == '-m'):
+                self.changeItemAmount()
 
             # List items in the budget by a given string, or list all
             elif (argv[1] == 'list' or
@@ -488,6 +499,95 @@ class Program:
             print("An item with the ID " + argv[2] + " could not be found.")
         print() # Final spacer
 
+    ## Adds a termination date to an object, object by ID
+    def terminateItem(self):
+        if not self.assertArgNum(4):
+            print('Could not add termination date: malformed request.')
+            print()
+            exit()
+        
+        item, idx = self.searchByID(argv[2])
+        date = self.parseDate(argv[3])
+
+        # Inform the user, and also do the thing
+        if item:
+            oldDate = 'None'
+            if item.fields[Terms.TDATE] != None:
+                oldDate = item.fields[Terms.TDATE].clone().getFull()
+            newDate = date.getFull()
+            itemID = item.fields[Terms.ID]
+            itemName = item.fields[Terms.NAME]
+            
+            item.fields[Terms.TDATE] = date
+            print(itemID + '  ' + itemName + '    : ' + oldDate + " --> " + newDate)
+        else:
+            print("An item with the ID " + argv[2] + " could not be found.")
+        print()
+
+    ## Toggles an expense item's 'important' flag, searched for by ID
+    def toggleItemImportance(self):
+        if not self.assertArgNum(3):
+            print('Could not toggle item importance: malformed request.')
+            print()
+            exit()
+        
+        item, idx = self.searchByID(argv[2])
+
+        if item:
+            flag = item.fields[Terms.IMPORTANT]
+            item.fields[Terms.IMPORTANT] = not flag
+            itemID = item.fields[Terms.ID]
+            itemName = item.fields[Terms.NAME]
+
+            print(itemID + '  ' + itemName + '    : ' + ('starred' if not flag else 'unstarred'))
+        else:
+            print("An item with the ID " + argv[2] + " could not be found.")
+            # TODO I really repeat myself a lot here, don't I?
+        print()
+
+
+    ## Changes an expense item's name, searched for by ID
+    def changeItemName(self):
+        if not self.assertArgNum(4):
+            print('Could not update item name: malformed request.')
+            print()
+            exit()
+        
+        item, idx = self.searchByID(argv[2])
+        newName = argv[3]
+
+        if item:
+            oldName = item.fields[Terms.NAME]
+            item.fields[Terms.NAME] = newName
+            itemID = item.fields[Terms.ID]
+
+            print(itemID + '  ' + oldName + '    -->    ' + newName)
+        else:
+            print("An item with the ID " + argv[2] + " could not be found.")
+        print()
+
+    ## Changes an expense item's amount, serached for by ID
+    def changeItemAmount(self):
+        if not self.assertArgNum(4):
+            print('Could not update item amount: malformed request.')
+            print()
+            exit()
+        
+        item, idx = self.searchByID(argv[2])
+
+        if item:
+            newVal = self.parseAmount(argv[3], item.amount() >= 0)
+            oldAmount = item.amountStr()
+            item.fields[Terms.AMOUNT] = newVal
+            newAmount = item.amountStr()
+            itemID = item.fields[Terms.ID]
+            itemName = item.fields[Terms.NAME]
+
+            print(itemID + '  ' + itemName + '    : ' + oldAmount + ' --> ' + newAmount)
+        else:
+            print("An item with the ID " + argv[2] + " could not be found.")
+        print()
+
     ## Lists all items in the budget so long as they contain a search string
     def listItems(self):
         if self.assertArgNum(2):
@@ -593,6 +693,9 @@ class Program:
         netTotal = 0
         width = Expense.displayWidth()
 
+        print(self.curDate.getFull())
+        print()
+
         done = False
         while not done:
             # Find the next, soonest expense
@@ -635,9 +738,11 @@ class Program:
     ## Displays an itemized "receipt" of all expenses and incomes from the startDate to the endDate
     # startDate and endDate should be DueDate objects
     def d_itemizedProjection(self, startDate, endDate):
-        print("Itemized Budget (" + self.getPeriod(startDate, endDate) + ")")
-        print(self.horizontalRule())
+        pass
+        # print("Itemized Budget (" + self.getPeriod(startDate, endDate) + ")")
+        # print(self.horizontalRule())
 
+        # TODO
         # This one is gonna have to do some stuff:
         #   It needs a list of expense objects, and their count
         #   It needs to print its own version of Expense.display()
@@ -879,11 +984,20 @@ class Expense:
     # Returns true if this is the last occurrence of this payment, meaning the next period interval lies
     # beyond the termination date.
     def lastPayment(self):
+        if self.fields[Terms.PERIOD] == Period.Singular:
+            return True     # This is by-default the last payment
         if self.fields[Terms.TDATE] is None:
             return False    # This payment does not end
         
-        d = self.fields[Terms.DDATE]
-        return d.advancePeriod(self.fields[Terms.PERIOD]) > self.fields[Terms.TDATE]
+        last = False
+
+        # Must be valid ~and~ its advance must be invalid to be the last payment
+        date = self.fields[Terms.DDATE]
+        if (date <= self.fields[Terms.TDATE] and
+            d.advancePeriod(self.fields[Terms.PERIOD]) > self.fields[Terms.TDATE]):
+            last = True
+
+        return last
     
     # Returns true if the given var represents an instance of Expense (this class)
     def verifyOther(self, other):
