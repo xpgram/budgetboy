@@ -176,6 +176,10 @@ class Program:
                 s = s[0:len(s)-2]
                 print(s)
                 toRemove.append(i)
+            
+            # If the item is a one-time event, just omit the TDATE, ggezuz
+            if item.fields[Terms.PERIOD] == Period.Singular:
+                item.fields[Terms.TDATE] = None
 
             # If the item has not been relevant for longer than 1 year, delete silently.
             if (item.fields[Terms.TDATE] != None and
@@ -210,7 +214,8 @@ class Program:
     ## Update due dates to their next occurrence from the present
     def update(self):
         for item in self.budgetItems:
-            if item.fields[Terms.PERIOD] != Period.Singular:
+            if (item.fields[Terms.PERIOD] != Period.Singular and
+                item.expired() == False):
                 while item.fields[Terms.DDATE] < self.curDate:
                     item.rollForward()
 
@@ -364,7 +369,7 @@ class Program:
         fields[Terms.ID] = newid
         fields[Terms.AMOUNT] = amt
         fields[Terms.DDATE] = date
-        fields[Terms.TDATE] = date if prd == Period.Singular else None
+        fields[Terms.TDATE] = None
         fields[Terms.PERIOD] = prd
         fields[Terms.IMPORTANT] = impt
 
@@ -755,6 +760,9 @@ class Program:
         # print("Itemized Budget (" + self.getPeriod(startDate, endDate) + ")")
         # print(self.horizontalRule())
 
+        # TODO WHEN YOU WRITE THE WHILE-LOOP, REMEMBER TO OMIT SINGULARS AND EXPIREDS
+        # YOU FUCKIN IDIOT
+
         # TODO
         # This one is gonna have to do some stuff:
         #   It needs a list of expense objects, and their count
@@ -985,6 +993,9 @@ class Expense:
     # Used to revive a terminated bill that still exists in the record.
     # Records are cleared of an expense 1 year after their termination date.
     def revive(self):
+        if self.fields[Terms.PERIOD] == Period.Singular:
+            return      # This'll just cause an infinite-loop
+        
         self.fields[Terms.TDATE] = None
         while (self.fields[Terms.DDATE] < program.curDate):
             self.rollForward()
