@@ -185,6 +185,10 @@ class Program:
             if (item.fields[Terms.TDATE] != None and
                 item.fields[Terms.TDATE] < (self.curDate - Time(years=1))):
                 silentRemove.append(i)
+            # One-time payments will be removed by their DDATEs
+            elif (item.fields[Terms.PERIOD] == Period.Singular and
+                item.fields[Terms.DDATE] < (self.curDate - Time(years=1))):
+                silentRemove.append(i)
 
         # Report to the user how many items were deleted, and delete them.
         if len(toRemove) > 0:
@@ -718,7 +722,12 @@ class Program:
                     if nxt == None or nxt > expenses[i]:
                         nxt = expenses[i]
                         idx = i
-            
+
+            # If an event is expired, omit its presence            
+            if nxt.expired():
+                expenses.pop(idx)
+                continue
+
             # Display the next, soonest expense, if one was found, and roll its date forward
             if nxt != None:
                 print(nxt.displayStr())
@@ -726,8 +735,6 @@ class Program:
                 netTotal += nxt.amount()    # Tally up
                 if nxt.fields[Terms.PERIOD] == Period.Singular:
                     expenses.pop(idx)       # If event is one-time, stop considering
-                if nxt.expired():
-                    expenses.pop(idx)       # If event expires after the just-printed date, stop considering
             # However, if one wasn't found, stop looking
             else:
                 done = True
