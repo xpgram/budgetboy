@@ -236,6 +236,8 @@ class Program:
         # Oh, also, I don't actually know how this boy handles an empty file anymore.
         # I thought that it freaked out the last time I tried, and hung in an infinite loop.
         # So, I dunno, check?
+        #
+        # Oh, and last-thing, last-thing: fix that fucking relative-path problem, god damn.
         
         # proj MM-DD-YY
         # proj 6m 3d 2y
