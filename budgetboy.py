@@ -11,6 +11,9 @@ from enum import Enum
 ## TODO Get it to print a list of bills.
 ## TODO Get it to interpret commands, such as 'add' and 'rem'
 
+# Globals
+argv = sys.argv
+
 class Program:
 
     def __init__(self):
@@ -20,25 +23,19 @@ class Program:
 
         self.separatorChar = '`'
         self.IDs = []
-
         self.budgetItems = []
-        self.budgetPeriod = []       # I have no idea what this was supposed to be for
 
-        self.args = sys.argv
-        self.datafilePath = "C:\\Users\\XPGram\\Home\\Scripts\\Data\\budgetboy_data"      # Can I use relative path?
+        # TODO Make this a relative path
+        # Relative to the script's source location, anyway
+        self.datafilePath = "C:\\Users\\XPGram\\Home\\Scripts\\Data\\budgetboy_data"
         
     def run(self):
-        log('load')
+        print()             # First spacer, separates the shell command line from the output
         self.load()         # Loads all the data that there is
-        log('update')
         self.update()       # Updates the list of data with the current date
-        log('sort')
         self.sort()         # Sorts the list of data by relevance (soonest and largest due)
-        log('input')
         self.userInput()    # Interprets user arguments, does something
-        log('clean')
         self.clean()        # Cleans the list of data of invalid or broken entries, warning the user
-        log('save')
         self.save()         # Saves the final list of data to a file, backing up the old one
 
     # Saves the list of bills and income in a handy-dandy file
@@ -152,7 +149,7 @@ class Program:
                 self.IDs.append(e.fields[Terms.ID])
                 program.budgetItems.append(e)
             else:
-                print(">> " + e.display())
+                print(">> " + e.displayStr())
                 raise Exception("Data is corrupt; this item did not validate correctly.")
 
             # Continue dat while loop
@@ -222,18 +219,7 @@ class Program:
         # TODO bby wrk on ths
 
         # no input:     display
-        # add "name" amount date (optional)period (optional)important
-        # new "name" amount date (optional)period (optional)important
-        # -a "name" amount date (optional)period (optional)important
-        #           amount is assumed to be an expense (typing +amount forces income, or use addi)
-        #           date format is MM-DD-YYYY       if year and month are left out, curYear/curMonth are assumed
-        #           period is [s w b m a] or singular/one-time/once, weekly/7, biweekly/bi-weekly/14, monthly/""(default), annually/yearly
-        #           important is false by default, but passing '*' or 'important' or 'always-show' will enable it
-        # addi "name" amount date (optional)period (optional)important
-        #           forces +amount. for consistency, I guess, passing '-[amount]' will force expense
-        # rem [ID]
-        # -r [ID]
-        #           Removes the ID'd bill (or income) from the database
+        
         # payed [ID]
         # -p [ID]
         #           "pays" the ID'd bill (or income; they're the same object)
@@ -292,7 +278,7 @@ class Program:
         #   I think if I set 'budgeted' as a flag, I can choose to ignore the DATE object (but still have one),
         #   and I can roll the item forward by any Period (maybe 'Food' is bi-weekly, huh?)
 
-        if len(self.args) < 2:      # If 'budgetboy' is the only argument: Default View
+        if len(argv) < 2:      # If 'budgetboy' is the only argument: Default View
             # Block 1: Display 1-month forward, list all expenses as events
             self.d_eventListProjection(Time(days=30))
 
@@ -307,6 +293,171 @@ class Program:
 
             # Block 2: Display an itemized budget for the current relevant month
             self.d_itemizedProjection(start, end)
+
+        elif len(argv) >= 2:
+            if (argv[1] == 'add' or
+                argv[1] == 'new' or
+                argv[1] == '-a'):
+                self.addItem()
+
+            elif (argv[1] == 'addi' or
+                  argv[1] == 'newi' or
+                  argv[1] == '-ai'):
+                self.addItem(True)
+
+            elif (argv[1] == 'rem' or
+                  argv[1] == '-r'):
+                self.removeItem()
+
+    ## Adds a new expense object to the global list
+    # 'income' determines the sign of the amount field, and is for the command addi specifically.
+    def addItem(self, income=False):
+        # Arguments must be between 5 and 7 inclusive
+        argNum = len(argv)
+        if argNum < 5 or argNum > 7:
+            print("Item could not be added: malformed request.")
+            print()
+            return
+
+        # Collect user input. Provide feedback if incorrect.
+        name = argv[2]
+        amt = self.parseAmount(argv[3], income)
+        date = self.parseDate(argv[4])
+        prd = Period.Monthly
+        impt = False
+        for i in range(5, argNum):
+            prd = self.parsePeriod(argv[i])
+            impt = self.parseImportance(argv[i])
+
+        # Generate a unique ID for the new expense object
+        newid = self.newID()
+        self.IDs.append(newid)
+
+        # Build a new expense object
+        fields = {}
+        fields[Terms.NAME] = name
+        fields[Terms.ID] = newid
+        fields[Terms.AMOUNT] = amt
+        fields[Terms.DDATE] = date
+        fields[Terms.TDATE] = None
+        fields[Terms.PERIOD] = prd
+        fields[Terms.IMPORTANT] = impt
+
+        expense = Expense(fields)
+
+        # Inform the user it was successful, and add it.
+        print(expense.displayStr())
+        print("New expense object successfully added.")
+        print()
+
+        self.budgetItems.append(expense)
+
+    ## Parses a string for an expense amount
+    def parseAmount(self, s, income=False):
+        if len(s) == 0:
+            return None
+
+        # 'income' labels what kind of 'expense' this amount is. This is given by the program.
+        # An '+' or an '-' found in the string forces one or the other.
+        if s.find('+') != -1:
+            income = True
+            s = s.replace('+', '', 1)
+        elif s.find('-') != -1:
+            income = False
+            s = s.replace('-', '', 1)
+
+        # Remove one '$' if the user (was stupid enough! Ha! Take that user!) included one
+        if s.find('$'):
+            s = s.replace('$', '', 1)
+
+        try:
+            amt = int(s)
+            log('amt = ' + str(amt))
+        except ValueError:
+            print("Item could not be added: the amount integer could not be parsed.")
+            exit()
+        
+        amt = abs(amt)  # I dunno. Users are weird.
+        return amt if income else -amt
+    
+    ## Parse a string for a date object
+    def parseDate(self, s):
+        # Dates can be given:
+        #   MM-DD-YYYY
+        #   MM-DD-yy
+        #   MM-DD       Year assumed: this
+        #   DD          Month and year assumed: this
+        #  '[name] 6'       Year assumed: this
+        #  '[name] 6 2019'
+        # TODO I will try harder later. Right now, only MM-DD-YYYY is accepted.
+
+        # I can at least add support for MM-DD
+        if len(s) == 5:
+            s = s + '-' + str(self.curDate.year)
+
+        try:
+            date = DueDate()
+            date.fromString(s)
+        except ValueError:
+            print("Item could not be added: the date integers could not be parsed.")
+            exit()
+        except Exception:
+            print("Item could not be added: date object did not fit MM-DD-YYYY")
+            exit()
+        
+        return date
+
+    ## Parse a string for a Period.Value
+    def parsePeriod(self, s):
+        kw_singular = ['s', 'singular', 'one-time', 'once']
+        kw_weekly = ['w', 'weekly', '7']
+        kw_biweekly = ['b', 'biweekly', 'bi-weekly', '14']
+        kw_monthly = ['m', 'monthly']
+        kw_annually = ['y', 'a', 'yearly', 'annually', 'annual']
+        full_list = [kw_singular, kw_weekly, kw_biweekly, kw_monthly, kw_annually]
+        repr_list = [Period.Singular, Period.Weekly, Period.BiWeekly, Period.Monthly, Period.Annually]
+
+        for i in range(0, len(full_list)):
+            for w in full_list[i]:
+                if w == s.lower():
+                    return repr_list[i]
+        
+        return Period.Monthly       # No terms found, return the default
+
+
+    ## Parse a string for an 'Important' flag
+    def parseImportance(self, s):
+        r = False
+        keywords = ['*', '**', 'star', 'starred', 'important', 'always-show']
+        for k in keywords:
+            if k == s.lower():
+                r = True
+        return r
+
+    ## Removes an item by its ID
+    def removeItem(self):
+        # Assert argument length
+        if not self.assertArgNum(3):
+            print('Could not delete item: malformed request.')
+            exit()
+        
+        item = None
+
+        # Find and delete the item
+        for i in range(0, len(self.budgetItems)):
+            if self.budgetItems[i].fields[Terms.ID] == argv[2]:
+                item = self.budgetItems[i]
+                self.budgetItems.pop(i)
+                break
+
+        # Inform the user
+        if item:
+            print(item.displayStr())
+            print("This item has been deleted.")
+        else:
+            print("An item with the ID " + argv[2] + " could not be found.")
+        print() # Final spacer
+
 
     ## Displays an at-a-glance of the coming bills (within 30 days)
     # timeLength should be a Time object
@@ -438,6 +589,10 @@ class Program:
     def horizontalRule(self):
         return '=' * Expense.displayWidth()
 
+    ## Returns true if the number of arguments given to the program equals n
+    def assertArgNum(self, n):
+        return len(argv) == n
+
 
 
 
@@ -504,13 +659,13 @@ class Expense:
     def displayStr(self):
         s = '' + self.fields[Terms.ID] + '  '
         s = s + self.fields[Terms.DDATE].get(self.lastPayment()) + ' '
-        s = s + '{:30.30}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ')
+        s = s + '{:35.35}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ')
         s = s + ('  ') + "{:>8}".format(self.amountStr())
         return s
 
     @staticmethod
     def displayWidth():
-        return 56       # Would be nice, I guess, to calculate this.
+        return 61       # Would be nice, I guess, to calculate this.
 
     # Returns this expense's amount as a string in currency format
     def amountStr(self):
@@ -605,7 +760,7 @@ class DueDate:
         self.assertValidity()
     
     def __str__(self):
-        return "{:02d}-{:02d}-{}".format(self.day, self.month, self.year)
+        return "{:02d}-{:02d}-{}".format(self.month, self.day, self.year)
     
     def __eq__(self, o):
         if o is None:
@@ -677,8 +832,8 @@ class DueDate:
         if len(ls) != 3:
             raise Exception("Cannot read date from string: str = " + s)
 
-        self.day = int(ls[0])
-        self.month = int(ls[1])
+        self.month = int(ls[0])
+        self.day = int(ls[1])
         self.year = int(ls[2])
 
         self.assertValidity()
