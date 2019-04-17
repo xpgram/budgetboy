@@ -27,7 +27,7 @@ class Program:
 
         # TODO Make this a relative path
         # Relative to the script's source location, anyway
-        self.datafilePath = "C:\\Users\\XPGram\\Home\\Scripts\\Data\\budgetboy_data"
+        self.datafilePath = "C:\\Users\\xpgra\\Home\\Scripts\\Data\\budgetboy_data"
         
     def run(self):
         print()             # First spacer, separates the shell command line from the output
@@ -470,7 +470,7 @@ class Program:
     ## Parse a string for an 'Important' flag
     def parseImportance(self, s):
         r = False
-        keywords = ['*', '**', 'star', 'starred', 'important', 'always-show']
+        keywords = ['*', '**', 'star', 'starred', 'mark', 'marked', 'important', 'always-show']
         for k in keywords:
             if k == s.lower():
                 r = True
@@ -561,7 +561,7 @@ class Program:
             itemID = item.fields[Terms.ID]
             itemName = item.fields[Terms.NAME]
 
-            print(itemID + '  ' + itemName + '    : ' + ('starred' if not flag else 'unstarred'))
+            print(itemID + '  ' + itemName + '    : ' + ('marked' if not flag else 'unmarked'))
         else:
             print("An item with the ID " + argv[2] + " could not be found.")
             # TODO I really repeat myself a lot here, don't I?
@@ -629,7 +629,7 @@ class Program:
             time = None
         
         # If that didn't work, attempt to parse time in MM-DD-YYYY format
-        if time is None and self.assertArgNum(3):
+        if time == None and self.assertArgNum(3):
             date = self.parseDate(argv[2])
 
             # If the user dumb, just give up
@@ -644,7 +644,7 @@ class Program:
             time = Time(days=d, months=m, years=y)
 
         # Clearly we're broken
-        else:
+        if time == None:
             print('Could not create projection: malformed request.')
             print()
             exit()
@@ -802,7 +802,7 @@ class Program:
 
         # Final Statement: Financial Net Total
         s = '{:>' + str(width-10) + '}  '
-        s = s.format("Net total for 30-day projection:")
+        s = s.format("Net total for {}projection:".format("30-day " if timeLength.day == 30 else ''))
         sign = '+' if netTotal > 0 else '-'
         s = s + "{:>8}".format(sign + "$" + str(abs(netTotal)))
         print(s)
