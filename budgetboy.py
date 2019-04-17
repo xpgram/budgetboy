@@ -359,7 +359,7 @@ class Program:
         fields[Terms.ID] = newid
         fields[Terms.AMOUNT] = amt
         fields[Terms.DDATE] = date
-        fields[Terms.TDATE] = None
+        fields[Terms.TDATE] = date if prd == Period.Singular else None
         fields[Terms.PERIOD] = prd
         fields[Terms.IMPORTANT] = impt
 
@@ -702,16 +702,22 @@ class Program:
         while not done:
             # Find the next, soonest expense
             nxt = None
+            idx = None
             for i in range(0, len(expenses)):
                 if expenses[i].fields[Terms.DDATE] <= endDate:
                     if nxt == None or nxt > expenses[i]:
                         nxt = expenses[i]
+                        idx = i
             
             # Display the next, soonest expense, if one was found, and roll its date forward
             if nxt != None:
                 print(nxt.displayStr())
                 nxt.rollForward()
                 netTotal += nxt.amount()    # Tally up
+                if nxt.fields[Terms.PERIOD] == Period.Singular:
+                    expenses.pop(idx)       # If event is one-time, stop considering
+                if nxt.expired():
+                    expenses.pop(idx)       # If event expires after the just-printed date, stop considering
             # However, if one wasn't found, stop looking
             else:
                 done = True
@@ -996,7 +1002,7 @@ class Expense:
         # Must be valid ~and~ its advance must be invalid to be the last payment
         date = self.fields[Terms.DDATE]
         if (date <= self.fields[Terms.TDATE] and
-            d.advancePeriod(self.fields[Terms.PERIOD]) > self.fields[Terms.TDATE]):
+            date.advancePeriod(self.fields[Terms.PERIOD]) > self.fields[Terms.TDATE]):
             last = True
 
         return last
