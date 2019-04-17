@@ -324,10 +324,16 @@ class Program:
                   argv[1] == '-n'):
                 self.changeItemName()
             
+            # Change the amount of an expense object, by ID
             elif (argv[1] == 'amount' or
                   argv[1] == 'amt' or
                   argv[1] == '-m'):
                 self.changeItemAmount()
+
+            # Display normally, with the budget projected out from the current day
+            elif (argv[1] == 'projection' or
+                  argv[1] == 'proj'):
+                self.userProjection()
 
             # List items in the budget by a given string, or list all
             elif (argv[1] == 'list' or
@@ -604,6 +610,49 @@ class Program:
             print("An item with the ID " + argv[2] + " could not be found.")
         print()
 
+    # Displays an event-list projection of the budget from the current day to a day given by the user
+    def userProjection(self):
+        time = Time()
+
+        # Attempt to parse time in the format #d #m #y
+        for i in range(2, len(argv)):
+            s = argv[i]
+            c = s[ len(s)-1 : len(s) ]      # Get the last character
+            s = s[ 0 : len(s)-1 ]           # Omit the last character
+            if c == 'd' and time.day == 0:  # Consider only the first 'd' argument
+                time.day = int(s)
+            if c == 'm' and time.month == 0:
+                time.month = int(s)
+            if c == 'y' and time.year == 0:
+                time.year = int(s)
+        if time.day == 0 and time.month == 0 and time.year == 0:
+            time = None
+        
+        # If that didn't work, attempt to parse time in MM-DD-YYYY format
+        if time is None and self.assertArgNum(3):
+            date = self.parseDate(argv[2])
+
+            # If the user dumb, just give up
+            if date <= self.curDate:
+                print('Cannot project backwards.')
+                print()
+                exit()
+
+            d = date.day - self.curDate.day
+            m = date.month - self.curDate.month
+            y = date.year - self.curDate.year
+            time = Time(days=d, months=m, years=y)
+
+        # Clearly we're broken
+        else:
+            print('Could not create projection: malformed request.')
+            print()
+            exit()
+
+        # Finally, display until the end of 'time'
+        if time:
+            self.d_eventListProjection(time)
+
     ## Lists all items in the budget so long as they contain a search string
     def listItems(self):
         if self.assertArgNum(2):
@@ -724,7 +773,7 @@ class Program:
                         idx = i
 
             # If an event is expired, omit its presence            
-            if nxt.expired():
+            if nxt is not None and nxt.expired():
                 expenses.pop(idx)
                 continue
 
