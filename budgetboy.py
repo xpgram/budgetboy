@@ -344,6 +344,10 @@ class Program:
             elif (argv[1] == 'listall'):
                 self.listAll()
 
+            # Provides a helpful help screen
+            elif (argv[1] == 'help'):
+                self.displayHelp()
+
             # Default case
             else:
                 print('Actionable command not understood: ' + argv[1])
@@ -869,6 +873,11 @@ class Program:
         # Return the built string
         s = m1 + d1 + y1 + sep + m2 + d2 + y2
         return s[0:len(s)-1]        # Removes the trailing space
+
+    ## Displays a handy, dandy, candy.. shows you help information
+    def displayHelp(self):
+        pass
+        # TODO Show stuff
 
     ## Generates a new ID for a new income/expense object.
     def newID(self):
