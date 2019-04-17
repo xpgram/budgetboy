@@ -12,29 +12,33 @@ from enum import Enum
 ## TODO Get it to interpret commands, such as 'add' and 'rem'
 
 class Program:
-    
-    separatorChar = '`'
-    IDs = []
-
-    curDate = None
-    projectionDate = None
-    budgetItems = []
-    budgetPeriod = []       # I have no idea what this was supposed to be for
-
-    arg = sys.argv
-    datafilePath = "C:\\Users\\xpgra\\Home\\Scripts\\Data\\budgetboy_data"      # Can I use relative path?
 
     def __init__(self):
         dt = datetime.now()
         self.curDate = DueDate(dt.day, dt.month, dt.year)
-        self.projectionDate = self.curDate + Time(months=4)
+        self.projectionDate = self.curDate + Time(months=4)     # Projection date... 4 months I think is a dev-test
+
+        self.separatorChar = '`'
+        self.IDs = []
+
+        self.budgetItems = []
+        self.budgetPeriod = []       # I have no idea what this was supposed to be for
+
+        self.args = sys.argv
+        self.datafilePath = "C:\\Users\\XPGram\\Home\\Scripts\\Data\\budgetboy_data"      # Can I use relative path?
         
     def run(self):
+        log('load')
         self.load()         # Loads all the data that there is
+        log('update')
         self.update()       # Updates the list of data with the current date
+        log('sort')
         self.sort()         # Sorts the list of data by relevance (soonest and largest due)
+        log('input')
         self.userInput()    # Interprets user arguments, does something
+        log('clean')
         self.clean()        # Cleans the list of data of invalid or broken entries, warning the user
+        log('save')
         self.save()         # Saves the final list of data to a file, backing up the old one
 
     # Saves the list of bills and income in a handy-dandy file
@@ -46,13 +50,13 @@ class Program:
 
         ## Write all header fields into one line using the separator char.
         for term in Terms:
-            f.write(term + program.separatorChar)
+            f.write(str(term) + program.separatorChar)
         f.write("\n")
 
         ## Write each budget item as a line, following the format of the header fields, using the separator char.
         for b in self.budgetItems:
             for term in Terms:
-                f.write(b.fields[term] + program.separatorChar)
+                f.write(str(b.fields[term]) + program.separatorChar)
             f.write("\n")
         
         ## Close the data file
@@ -61,7 +65,11 @@ class Program:
     # Backs up the "old" datafile before saving a new one.
     def backup(self):
         ## Open 'from' file and 'to' file
-        r = open(self.datafilePath, 'r')
+        try:
+            r = open(self.datafilePath, 'r')
+        except FileNotFoundError:
+            return      # Nothing to do here
+        
         w = open(self.datafilePath + "_bk", 'w')
 
         ## Back 'em up
@@ -78,27 +86,29 @@ class Program:
             f = open(self.datafilePath, 'r')
         except FileNotFoundError:
             return      # Nothing to read here
-
+        
         ## read first line, should be the DB header
         line = f.readline()
-
+        if not line:
+            return      # No point in loading an empty file
+        
         ## verify its terms are.. correct?
-        if line:
-            for term in Terms:
-                if not line.find(str(term)):    # TODO I guess I should demand they also be the only fields... I dunno.
-                    raise Exception("File appears to be corrupt: file content does not match expected format.")
+        for term in Terms:
+            if line.find(str(term)) == -1:  # TODO I guess I should demand they also be the only fields... I dunno.
+                raise Exception("File appears to be corrupt: file content does not match expected format.")
         
         ## Break the header line into discrete pieces
         n = 0
         columnNames = []
+        line = line[0:line.find('\n')]
         while n < len(line):
-            columnNames.append(line[n:line.find(program.separatorChar, n)])
-            n = line.find(program.separatorChar, n) + len(program.separatorChar)
-
+            columnNames.append(line[n:line.find(self.separatorChar, n)])
+            n = line.find(self.separatorChar, n) + len(self.separatorChar)
+        
         ## Iterate over the proceeding lines, parsing them by the separator char
         ## (Also, remove the \n before iteration)
+        line = f.readline()
         while line:
-            line = f.readline()
             line = line[0:line.find('\n')]
             e = Expense()
             
@@ -144,7 +154,10 @@ class Program:
             else:
                 print(">> " + e.display())
                 raise Exception("Data is corrupt; this item did not validate correctly.")
-        
+
+            # Continue dat while loop
+            line = f.readline()
+
         # Finish
         f.close()
 
@@ -159,7 +172,7 @@ class Program:
             item = self.budgetItems[i]
 
             # If they self-report as invalid, report to the user and mark for deletion
-            if item.validate() == False:
+            if item.valid() == False:
                 s = "Deleted >> "
                 for term in Terms:
                     s = s + str(item.fields[term]) + " : "
@@ -176,12 +189,12 @@ class Program:
         if len(toRemove) > 0:
             print("Removed {} broken budget items.".format(len(toRemove)))
             print()
-            for i in toRemove:
-                self.budgetItems.pop(i)
+            for r in toRemove:
+                self.budgetItems.pop(r)
         
         # Silently delete old listings
-        for i in range(0, len(silentRemove)):
-            self.budgetItems.pop(i)
+        for r in silentRemove:
+            self.budgetItems.pop(r)
 
     ## Sorts the list by their duedate (soonest), then amount (biggest), then name.
     ## Well, the .compare() method does.
@@ -200,23 +213,13 @@ class Program:
     ## Update due dates to their next occurrence from the present
     def update(self):
         for item in self.budgetItems:
-            while (item.fields[Terms.PERIOD] != Period.Singular and
-                   item.fields[Terms.DDATE] < self.curDate):
-                item.fields[Terms.DDATE].advancePeriod(item.fields[Terms.PERIOD])
+            if item.fields[Terms.PERIOD] != Period.Singular:
+                while item.fields[Terms.DDATE] < self.curDate:
+                    item.rollForward()
 
     ## Interprets the user's arguments to the program as actionable.. actions.
     def userInput(self):
-        pass
         # TODO bby wrk on ths
-        # I am going to bed.
-        # This thing is finally almost done for real now.
-        # The last thing to do (and I really think the logic is fine--no errors) is to
-        # actually write down ways the program will collect user input and data,
-        # and display its internal list.
-        # Almost a big step unto itself.
-        # It may take me some hours.
-        # I hope not too many.
-        # The basic 'listadd' , 'listdisplay' functionality ought to be easy enough.
 
         # no input:     display
         # add "name" amount date (optional)period (optional)important
@@ -289,6 +292,126 @@ class Program:
         #   I think if I set 'budgeted' as a flag, I can choose to ignore the DATE object (but still have one),
         #   and I can roll the item forward by any Period (maybe 'Food' is bi-weekly, huh?)
 
+        if len(self.args) < 2:      # If 'budgetboy' is the only argument: Default View
+            # Block 1: Display 1-month forward, list all expenses as events
+            self.d_eventListProjection(Time(days=30))
+
+            # Find the first of the current relevant month
+            start = self.curDate.clone()
+            if start.day > 25: start + Time(months=1)   # Advance the month forward once this month is almost over
+            start.day = 1
+
+            # Find the last of the current relevant month
+            end = start.clone()
+            end.day = Month.length(end.month)
+
+            # Block 2: Display an itemized budget for the current relevant month
+            self.d_itemizedProjection(start, end)
+
+    ## Displays an at-a-glance of the coming bills (within 30 days)
+    # timeLength should be a Time object
+    # Does not have a clock roll-back feature because that's not what this is for.
+    def d_eventListProjection(self, timeLength):
+        endDate = self.curDate + timeLength     # The time-window we are considering.
+        expenses = self.copyList()              # Exists so that changes to item dates do not reflect on the actual list.
+        netTotal = 0
+        width = Expense.displayWidth()
+
+        done = False
+        while not done:
+            # Find the next, soonest expense
+            nxt = None
+            for i in range(0, len(expenses)):
+                if expenses[i].fields[Terms.DDATE] <= endDate:
+                    if nxt == None or nxt > expenses[i]:
+                        nxt = expenses[i]
+            
+            # Display the next, soonest expense, if one was found, and roll its date forward
+            if nxt != None:
+                print(nxt.displayStr())
+                nxt.rollForward()
+                netTotal += nxt.amount()    # Tally up
+            # However, if one wasn't found, stop looking
+            else:
+                done = True
+        
+        print() # Spacer
+
+        # Print any '**' important items outside the time-window in a separate block
+        block2 = False
+        for i in range(0, len(self.budgetItems)):
+            if self.budgetItems[i].fields[Terms.IMPORTANT]:
+                if self.budgetItems[i].fields[Terms.DDATE] > endDate:
+                    print(self.budgetItems[i].displayStr())
+                    block2 = True
+
+        if block2: print() # Spacer
+
+        # Final Statement: Financial Net Total
+        s = '{:>' + str(width-10) + '}  '
+        s = s.format("Net total for 30-day projection:")
+        sign = '+' if netTotal > 0 else '-'
+        s = s + "{:>8}".format(sign + "$" + str(abs(netTotal)))
+        print(s)
+
+        print() # Final Spacer
+
+    ## Displays an itemized "receipt" of all expenses and incomes from the startDate to the endDate
+    # startDate and endDate should be DueDate objects
+    def d_itemizedProjection(self, startDate, endDate):
+        print("Itemized Budget (" + self.getPeriod(startDate, endDate) + ")")
+        print(self.horizontalRule())
+
+        # This one is gonna have to do some stuff:
+        #   It needs a list of expense objects, and their count
+        #   It needs to print its own version of Expense.display()
+        #     with the net-total of all its occurrences
+
+    ## Returns a string detailing a time-period's start to end in a nice format
+    def getPeriod(self, start, end):
+        # Get all string displays / add a space for auto-format
+        m1 = Month.name(start.month) + ' '
+        d1 = str(start.day) + ' '
+        y1 = str(start.year) + ' '
+        m2 = Month.name(end.month) + ' '
+        d2 = str(end.day) + ' '
+        y2 = str(end.year) + ' '
+        sep = '- '
+
+        # Years are the same
+        if (start.year == end.year):
+            # years are omitted
+            y1 = ''
+            y2 = ''
+            # start.day is omitted if it's the first
+            if start.day == 1:
+                d1 = ''
+            # end.day is omitted if it's the last
+            if end.day == Month.length(end.month):
+                d2 = ''
+            # end.month is omitted if it's the same, but not if day isn't
+            if d2 == '' and end.month == start.month:
+                m2 = ''
+        # Years are different
+        else:
+            # day is omitted if it's the first
+            if start.day == 1:
+                d1 = ''
+            if end.day == 1:
+                d2 = ''
+            # month is omitted if it's Jan, but not if day isn't
+            if d1 == '' and start.month == 1:
+                m1 = ''
+            if d2 == '' and end.month == 1:
+                m2 = ''
+        # sep is omitted if end is completely omitted
+        if d2 == '' and m2 == '' and y2 == '':
+            sep = ''
+        
+        # Return the built string
+        s = m1 + d1 + y1 + sep + m2 + d2 + y2
+        return s[0:len(s)-1]        # Removes the trailing space
+
     ## Generates a new ID for a new income/expense object.
     def newID(self):
         if len(self.IDs) < 999:
@@ -304,15 +427,50 @@ class Program:
         else:
             raise Exception("There are no available IDs to give out; update code to allow 4 digits?")
 
+    ## Deep copies the expense list and returns it
+    def copyList(self):
+        l = []
+        for item in self.budgetItems:
+            l.append(item.clone())
+        return l
+
     ## Returns a string of '=' equal in length to the width of the display area
     def horizontalRule(self):
-        return '='*57       # TODO Update this? 57 I think should be accurate.
+        return '=' * Expense.displayWidth()
+
+
+
+
+
+
+
+
+
 
 class Expense:
 
-    def __init__(self, fields={}):
-        self.fields = fields
+    def __init__(self, fields=None):
+        if fields == None:
+            self.fields = {}
+        else:
+            self.fields = fields
         
+    def __eq__(self, o):
+        if o is None: return False
+        return self.compare(o) == 0
+
+    def __gt__(self, o):
+        return self.compare(o) == 1
+    
+    def __ge__(self, o):
+        return self.compare(o) > -1
+
+    def __lt__(self, o):
+        return self.compare(o) == -1
+
+    def __le__(self, o):
+        return self.compare(o) < 1
+
     # Returns true if all required fields are filled in and with correct data.
     def valid(self):
         t1 = False
@@ -335,7 +493,6 @@ class Expense:
         # Confirm all fields have legal values.
         if (self.fields[Terms.NAME] != "" and
             between(int(self.fields[Terms.ID]), 0, 1000) and
-            self.fields[Terms.AMOUNT] > 0 and
             Period.valid(self.fields[Terms.PERIOD]) and
             self.fields[Terms.DDATE].valid()):
             t2 = True
@@ -343,10 +500,17 @@ class Expense:
         return t1 and t2
 
     # Returns a formatted line considered this expense object's 'formal display'
-    def display(self):
-        s = "" + self.fields[Terms.DDATE].get(self.lastPayment())
-        s = s + ' {:50}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ')
-        s = s + (' ' * 4) + "{:>8}".format(self.amountStr())
+    # Full width = 56
+    def displayStr(self):
+        s = '' + self.fields[Terms.ID] + '  '
+        s = s + self.fields[Terms.DDATE].get(self.lastPayment()) + ' '
+        s = s + '{:30.30}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ')
+        s = s + ('  ') + "{:>8}".format(self.amountStr())
+        return s
+
+    @staticmethod
+    def displayWidth():
+        return 56       # Would be nice, I guess, to calculate this.
 
     # Returns this expense's amount as a string in currency format
     def amountStr(self):
@@ -392,8 +556,11 @@ class Expense:
     # Returns true if this is the last occurrence of this payment, meaning the next period interval lies
     # beyond the termination date.
     def lastPayment(self):
-        d = self.fields[Terms.DDATE].clone()
-        return d.advancePeriod() > self.fields[Terms.TDATE]
+        if self.fields[Terms.TDATE] is None:
+            return False    # This payment does not end
+        
+        d = self.fields[Terms.DDATE]
+        return d.advancePeriod(self.fields[Terms.PERIOD]) > self.fields[Terms.TDATE]
     
     # Returns true if the given var represents an instance of Expense (this class)
     def verifyOther(self, other):
@@ -414,9 +581,21 @@ class Expense:
         for term in Terms:
             e.fields[term] = self.fields[term]
         e.fields[Terms.DDATE] = self.fields[Terms.DDATE].clone()
-        e.fields[Terms.TDATE] = self.fields[Terms.TDATE].clone()
+        if self.fields[Terms.TDATE] == None:
+            e.fields[Terms.TDATE] = None
+        else:
+            e.fields[Terms.TDATE] = self.fields[Terms.TDATE].clone()
         return e
     
+
+
+
+
+
+
+
+
+
 class DueDate:
 
     def __init__(self, day=1, month=1, year=1):
@@ -429,6 +608,8 @@ class DueDate:
         return "{:02d}-{:02d}-{}".format(self.day, self.month, self.year)
     
     def __eq__(self, o):
+        if o is None:
+            return False
         if not isinstance(o, DueDate):
             raise TypeError("expected a DueDate object, recieved {}".format(type(o)))
         day = self.effectiveDate()
@@ -438,9 +619,11 @@ class DueDate:
     def __gt__(self, o):
         day = self.effectiveDate()
         oday = o.effectiveDate()
-        b = self.year > o.year
-        if not b: b = self.month > o.month
-        if not b: b = day > oday
+
+        if self.year != o.year:      b = self.year > o.year
+        elif self.month != o.month:  b = self.month > o.month
+        else:                        b = day > oday
+
         return b
         
     def __ge__(self, o):
@@ -449,9 +632,11 @@ class DueDate:
     def __lt__(self, o):
         day = self.effectiveDate()
         oday = o.effectiveDate()
-        b = self.year < o.year
-        if not b: b = self.month < o.month
-        if not b: b = day < oday
+
+        if self.year != o.year:      b = self.year < o.year
+        elif self.month != o.month:  b = self.month < o.month
+        else:                        b = day < oday
+        
         return b
     
     def __le__(self, o):
@@ -464,14 +649,17 @@ class DueDate:
     
     def __iadd__(self, o):
         self.addTime(o)
+        return self
     
     def __sub__(self, o):
         d = self.clone()
+        o = Time(days=(-o.day), months=(-o.month), years=(-o.year))
         d.addTime(o)
         return d
     
     def __isub__(self, o):
         self.addTime(o)
+        return self
     
     def compare(self, o):
         if not isinstance(o, DueDate):
@@ -503,8 +691,8 @@ class DueDate:
         self.checkType(time)
 
         # Resolve months and years first.
-        self.year += time.years
-        self.month += time.months
+        self.year += time.year
+        self.month += time.month
 
         # Overflow months-out-of-range into years
         while self.month < Month.minimum:
@@ -515,9 +703,9 @@ class DueDate:
             self.year += 1
         
         # If days are being added/subtracted, then throw out the idealized date.
-        if time.days != 0:
+        if time.day != 0:
             self.day = self.effectiveDate() # Calc from a real point in time in the resulting month
-            self.day += time.days
+            self.day += time.day
 
             # Overflow days-out-of-range into months into years
             while self.day < Month.daysMin:
@@ -547,9 +735,9 @@ class DueDate:
     ## Allows me to project forward in time by relative due date
     def advancePeriod(self, period):
         d = self.clone()
-        if period == Period.Weekly: d += Time(days=7)
+        if period == Period.Weekly:     d += Time(days=7)
         elif period == Period.BiWeekly: d += Time(days=14)
-        elif period == Period.Monthly: d += Time(months=1)
+        elif period == Period.Monthly:  d += Time(months=1)
         elif period == Period.Annually: d += Time(years=1)
         return d
 
@@ -586,6 +774,15 @@ class DueDate:
             b = True
         return b
         
+
+
+
+
+
+
+
+
+
 class Time:
     
     def __init__(self, days=0, months=0, years=0):
@@ -593,6 +790,19 @@ class Time:
         self.month = months
         self.year = years
     
+    ## Frontloads all fields into one int value approximating the number of days each describes.
+    def lengthInDays(self):
+        return self.day + self.month*30 + self.year*365
+
+
+
+
+
+
+
+
+
+
 class Period(Enum):
     Singular = 1
     Weekly = 2
@@ -604,9 +814,12 @@ class Period(Enum):
     # I'll be honest, though, no idea when I used this.
     @staticmethod
     def valid(n):
-        if type(n) != int:
+        if type(n) == int:
+            return (within(n, 1, len(Period)))
+        elif type(n) == Period:
+            return True
+        else:
             raise Exception("Cannot validate parameter against enum values with {}".format(type(n)))
-        return (within(n, 1, len(Period)))
     
     # Return an Enum value equal to its name as a string
     @staticmethod
@@ -616,6 +829,15 @@ class Period(Enum):
                 return p
         return None
     
+
+
+
+
+
+
+
+
+
 class Month:
     maximum = 12
     minimum = 1
@@ -638,6 +860,15 @@ class Month:
             raise OverflowError("Value given is out of bounds; recieved {}".format(numeral))
         return cls.lengths[cls.names[numeral]]
 
+
+
+
+
+
+
+
+
+
 class Terms(Enum):
     NAME = 0
     ID = 1
@@ -647,6 +878,9 @@ class Terms(Enum):
     PERIOD = 5
     IMPORTANT = 6
 
+    def __str__(self):
+        return self.name
+
     # Return an Enum value equal to its own name as a string
     @staticmethod
     def fromString(s):
@@ -654,6 +888,15 @@ class Terms(Enum):
             if str(term) == s:
                 return term
         return None
+
+
+
+
+
+
+
+
+
 
 # Returns true if n is in the interval min to max, inclusive
 def within(n, min, max):
@@ -663,6 +906,11 @@ def within(n, min, max):
 def between(n, min, max):
     return (n > min and n < max)
 
+# debug feature
+def log(s):
+    print(s)
+
 ## Here's the epics:
 program = Program()
+
 program.run()
