@@ -244,6 +244,47 @@ class Program:
         # Add a save? boolean which prevents saving when something goes wrong, and then
         # try to keep exiting in the middle of the program to a minimum.
 
+        ## Holding Area
+        # Financial Events that are past-due are kept in a little container for ~10 days, or maybe just 7
+        # A figurative container; the display simply doesn't advance them until after this 7-day holding period.
+        # Lets me know what I may have missed recently; what if something is due on the 4th but I check it on the 5th?
+        # Looks like this:
+        #
+        #   Mar 05, 2019
+        #
+        #   Overdue:
+        #   541  Mar 01  Health Insurance           -$116
+        #   253  Mar 02  Phonebill                   -$96
+        #   365          Dental Insurance            -$20
+        #
+        #   724  Mar 15  Rent                       -$300
+        #   994  Mar 20  Loan: Tech Academy         -$200
+        #
+        #                             Net Total:      +$6
+        #
+        # I will have to change the update() function.
+        # I will have to add a new clause to the display() functions.
+        # This works better after adding "History Affects Net-Total"
+        # Financial objects will not post their amounts to the historical account until after the 7-day holding period (it is
+        #   assumed I wouldn't skip a payment), or when I pass the '-p'/'payed' command to their ID.
+        #
+        # Issue:
+        # One-time events will be held in the holding area too.
+        # 'budgetboy -p [ID]' just rolls duedates forward in time.
+        # How do I remove a payed one-time expense from the holding area?
+        #   [Create new field: Flag inert]      Simply denotes that a Financial object is no longer active.
+        #   When projecting into the past or future, the inert flag can be ignored if desired.
+        #   'inert' only means the bill does not affect the 'live' budget extending from today.
+        #   This is also useful for suspending a bill temporarily, though you will have to remember to come back and turn it on,
+        #   or when projecting into the future, it might allow you to see what your budget could look like without a certain payment.
+
+        ## Add New Command: duedate
+        # budgetboy -dd 01-30-2020
+        # Changes an item's duedate.
+        # I thought this wouldn't make sense, but it hurts nothing to add it, and it will occasionally be useful:
+        #   When I have entered the wrong date for a new item
+        #   When a one-time event is delayed to a later date
+
         ## Itemized Budget Display
         # I think I will rescind its presence on the default view.
         # But, when projecting over a long period of time, this view compacts the view-space.
@@ -253,6 +294,12 @@ class Program:
         # the 'proj' command accepts date and time arguments
         # allow the user to separate them with the word 'to'
         # Configure the projection-display method to take in two dates, one of them defaulting to the current date.
+
+        ## Give Fincancial Objects A New Field: StartDate
+        # If I'm going to allow rolling the clock back, I should prevent objects from affecting the budget before they existed.
+        # StartDate, DueDate, and TermDate give me all the information I need to know the beginning, next-occurrence and end of a bill.
+        # When creating a new fincancial object, the startdate is always the same as the duedate.
+        # This can be changed with the 'startdate' or '-sd' command, I guess.
 
         ## Itemized Budget Display is used for Date-to-Date projections
         # When showing a list of what happened in Apr, or from 2019 to 2020, use the Itemized Display.
@@ -275,7 +322,15 @@ class Program:
         # The first 3 listed accounts are displayed below the projections on the default view, or all of them upon request.
 
         ## Savings Affects Net-Total
-        # At least a default savings account, assumed to exist.
+        # Gives me a better snapshot picture of my financial standing.
+        # If I have $1500 saved up for whatever reason, this should reflect on my monthly net-total.
+        # Particularly, this prevents me from entering the red when I ought not to be.
+        # Not all savings accounts need reflect on the monthly total: some are savings for purchases and should be considered "spent".
+        # This blends with 'History' below because a 'savings deposit' fincancial event will necessarily add to its linked account,
+        #   but subtract from the historical account as a payment.
+
+        ## History Affects Net-Total
+        # I can use a savings account, at least a default one, to capture net-totals month to month.
         # This prevents the acquisition of a paycheck from ceasing to influence the net-total.
         # The net total, in this case, just builds on itself month after month
         # Here is a visual of the problem:
@@ -287,6 +342,22 @@ class Program:
         #   256  Apr 02  Phonebill          -$500
         #   411  Apr 03  Teeth Ins.          -$20
         #                     Net Total     -$520       This says I'm in the red, but that isn't true.
+        # I can do this with a "savings" account, I think... but I would have to be really careful about double-booking fees.
+        # I guess that wouldn't be too hard if I just held the previous month (or calculated it) and posted it to the gen.savings at the end.
+        # I would need a by-month net calculator that returns the +/- drift for that month alone.
+        # Or, I think this was intended, just post each financial event to a global 'history-account' that keeps track of everything.
+        # Geez. I knew there was a simpler solution.
+
+        ## History Corrections
+        # A new command: 
+        #   budgetboy -h
+        # This affects the historical savings account (I only keep a history of 1-year).
+        # Simply adds the given number to the historical savings account total.
+        # This will often be called with negative numbers, I imagine; historical drift will probably occur mostly from
+        #   small, miscellaneous payments unrecorded in the app.
+        # [budget -h -200] as a statement simply means that I have $200 less than the app thinks I do.
+        # This action creates a financial one-time event labelled 'Historical Correction' with the given amount and a DDATE of TODAY,
+        #   just for record purposes.
         
         ## Add a help screen
         # budgetboy help
@@ -297,13 +368,15 @@ class Program:
         # I'm not concerned, but still. Depends on how monthly salaries are distributed, really. I have no idea.
 
         ## Luxury Tallying in Itemized Budget Display
-        # Financial events have a new field: the 'luxury' flag
+        # Financial events have a new field: the 'luxury' flag (or 'miscellaneous')
         # Luxury items are one-time payments, usually entered the day of.
         # They are only meant to add up against the month's net total.
         # Their purpose is to account for non-small purchases that may grossly affect my end-of-the-month net totals.
         # Luxury items have names, but are displayed in aggregate in the Itemized Budget display, like this:
         #   If I bought 2 video games, expensive chocolate, and a concert ticket, those should be displayed as:
-        #   ---   x4  Luxury                  -$210
+        #   ---   x4  Miscellaneous                 -$210
+        # Consolidating 4 items isn't much of a big deal. It might even be more useful to list all 4 of them individually.
+        # This feature will be useful when the number approaches x10 and above, and listing all these items becomes visually sloppy.
 
         ## Blend Dates Together
         # To declutter the view-space, do this:
