@@ -438,66 +438,52 @@ class Program:
             # Add a new expense object
             if argv[1] in Keywords.AddExpense:
                 self.addItem()
-            # if (argv[1] == 'add' or
-            #     argv[1] == 'new' or
-            #     argv[1] == '-a'):
-            #     self.addItem()
 
             # Add a new 'income' object
-            elif (argv[1] == 'addi' or
-                  argv[1] == 'newi' or
-                  argv[1] == '-ai'):
+            elif argv[1] in Keywords.AddIncome:
                 self.addItem(True)
 
             # Remove an expense object by its ID
-            elif (argv[1] == 'rem' or
-                  argv[1] == '-r'):
+            elif argv[1] in Keywords.Remove:
                 self.removeItem()
 
             # Roll an expense object's date forward, by its ID
-            elif (argv[1] == 'payed' or
-                  argv[1] == '-p'):
+            elif argv[1] in Keywords.PayEvent:
                 self.advanceItemDate()
 
             # Add a termination date to an object, by its ID
-            elif (argv[1] == 'terminate' or
-                  argv[1] == 'term' or
-                  argv[1] == '-t'):
+            elif argv[1] in Keywords.TerminateEvent:
                 self.terminateItem()
 
             # Toggles an expense object's 'important' flag, by ID
-            elif (argv[1] == 'important' or
-                  argv[1] == 'star' or
-                  argv[1] == '-i'):
+            elif argv[1] in Keywords.ToggleImportance:
                 self.toggleItemImportance()
+            
+            # TODO Sets an expense object's 'important' flag to true, by ID
+            # TODO Sets an expense object's 'important' flag to false, by ID
 
             # Changes the name of an expense object, by ID
-            elif (argv[1] == 'name' or
-                  argv[1] == '-n'):
+            elif argv[1] in Keywords.SetName:
                 self.changeItemName()
             
             # Change the amount of an expense object, by ID
-            elif (argv[1] == 'amount' or
-                  argv[1] == 'amt' or
-                  argv[1] == '-m'):
+            elif argv[1] in Keywords.SetAmount:
                 self.changeItemAmount()
 
             # Display normally, with the budget projected out from the current day
-            elif (argv[1] == 'projection' or
-                  argv[1] == 'proj'):
+            elif argv[1] in Keywords.FinancialProjection:
                 self.userProjection()
 
             # List items in the budget by a given string, or list all
-            elif (argv[1] == 'list' or
-                  argv[1] == '-l'):
+            elif argv[1] in Keywords.FilteredListAllBudgetItems:
                 self.listItems()
             
             # List all items in the budget
-            elif (argv[1] == 'listall'):
+            elif argv[1] in Keywords.ListAllBudgetItems:
                 self.listAll()
 
             # Provides a helpful help screen
-            elif (argv[1] == 'help'):
+            elif argv[1] in Keywords.Help:
                 self.displayHelp()
 
             # Default case
