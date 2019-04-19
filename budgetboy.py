@@ -393,7 +393,7 @@ class Program:
         #   520  Apr 21* Large Yu-Gi-Oh! Playset   -$1700
         #   130  May 01  Health Insurance           -$116
         #   798          Teeth Insurance             -$20
-        #   100          The Tech Academy          -$1750
+        #   100          The Tech Academy       ** -$1750
         #   454  May 04  Phonebill                   -$96
         #   333        * Payment to Harry             -$7
         #
@@ -410,7 +410,7 @@ class Program:
         #   520  Apr 21* Large Yu-Gi-Oh! Playset   -$1700
         #   130  May 01  Health Insurance           -$116
         #
-        #   210  Jun 01* The Tech Academy          -$1750       These naturally don't count; they're just reminders
+        #   210  Jun 01* The Tech Academy       ** -$1750       These naturally don't count; they're just reminders
         #
         #   131  --- x3  Food                       -$120       These do, though, so that's confusing.
         #   141  -- x20  Transportation             -$250
@@ -436,10 +436,12 @@ class Program:
 
         elif len(argv) >= 2:
             # Add a new expense object
-            if (argv[1] == 'add' or
-                argv[1] == 'new' or
-                argv[1] == '-a'):
+            if argv[1] in Keywords.AddExpense:
                 self.addItem()
+            # if (argv[1] == 'add' or
+            #     argv[1] == 'new' or
+            #     argv[1] == '-a'):
+            #     self.addItem()
 
             # Add a new 'income' object
             elif (argv[1] == 'addi' or
@@ -1569,6 +1571,52 @@ class Terms(Enum):
             if str(term) == s:
                 return term
         return None
+
+
+
+
+
+
+
+
+
+
+class Keywords:
+    AddExpense = ['-a', 'add', 'new', 'expense']
+    AddIncome = ['-ai', 'addi', 'newi', 'income']
+    Remove = ['-r', 'rem', 'del']
+    PayEvent = ['-p', 'pay', 'payed']
+    SetName = ['-n', 'set-name']
+    SetAmount = ['-m', 'set-amount', 'set-amt']
+    SetDueDate = ['-dd', 'set-duedate', 'set-ddate']
+    TerminateEvent = ['-t', 'terminate', 'term', 'terminate-on', 'set-tdate']
+    ReviveTerminatedEvent = ['revive', 'set-tdate-none']
+    SetStartDate = ['set-startdate', 'set-sdate']
+    SetPeriod = ['-prd', 'set-period', 'set-interval']
+    ToggleImportance = ['-i', 'toggle-importance', 'toggle-mark', 'toggle-important']
+    SetImportant = ['mark', 'set-important', 'always-show']
+    SetUnimportant = ['unmark', 'set-common', 'natural-show']
+    ToggleInert = ['toggle-inert', 'toggle-suspend']
+    SetInert = ['set-inert', 'suspend']
+    SetActive = ['set-active', 'unsuspend']
+    ToggleAutoPay = []
+    SetAutoPay = []
+    SetManualPay = []
+    SetCategory = []        # Instead of setting a miscellaneous flag, why not set my own categories *including* miscellaneous?
+    SetNoCategory = []      # Then this one feature could encapsulate Misc., Food, Transport, and more.
+    SetDisplayAggregate = []    # Except 'Food' isn't a category, it's a hidden, recurring payment. So I need this, I guess.
+    SetDisplayOccurrence = []
+    SetAccountLink = []
+    SetNoAccountLink = []
+    FinancialProjection = ['proj', 'project']
+    FilteredListAllBudgetItems = ['-l', 'list']
+    ListAllBudgetItems = ['listall']
+    CorrectHistoricalRecord = []
+    CreateAccount = []
+    RemoveAccount = []
+    CorrectAccount = []
+    DisplayAccounts = []
+    Help = ['help']
 
 
 
