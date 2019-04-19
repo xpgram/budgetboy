@@ -367,6 +367,10 @@ class Program:
         # A thought: what about monthly periods like "3rd Thu of the Month"?
         # I'm not concerned, but still. Depends on how monthly salaries are distributed, really. I have no idea.
 
+        ## Use The Internet
+        # Concieve of some handy way to let my desktop and laptop communicate with each other so's I don't always have to
+        # open one or the other to look at my stuff.
+
         ## Luxury Tallying in Itemized Budget Display
         # Financial events have a new field: the 'luxury' flag (or 'miscellaneous')
         # Luxury items are one-time payments, usually entered the day of.
