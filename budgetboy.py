@@ -278,6 +278,11 @@ class Program:
         #   This is also useful for suspending a bill temporarily, though you will have to remember to come back and turn it on,
         #   or when projecting into the future, it might allow you to see what your budget could look like without a certain payment.
 
+        ## Auto-Events
+        # New field: auto
+        # Any event (singular, monthly, income, etc.) marked auto=True is not held in the overdue area, it simply rolls its ddate forward.
+        # Events that are not marked auto=True should have something visual, an 'm' for manual, maybe, posted somewhere in the display.
+
         ## Add New Command: duedate
         # budgetboy -dd 01-30-2020
         # Changes an item's duedate.
