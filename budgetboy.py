@@ -20,6 +20,11 @@ class Program:
         self.separatorChar = '`'
         self.IDs = []
         self.budgetItems = []
+        self.account = []           # TODO
+                                    # This feature needs to save accounts, maybe at the top.
+                                    # It needs to read accounts appropriately.
+                                    # Historical account ~always~ exists.
+                                    # 
 
         # TODO This only works for windows, currently
         # Attempt to create the userdata directory, if one doesn't already exist.
@@ -232,11 +237,6 @@ class Program:
         # TODO bby wrk on ths
         # Implement Feature List:
 
-        ## Expand ID Ranges
-        # From 001 - 999 to 0001 - 9999
-        # ~10,000 entries ought to be enough for all the extraneous purchases I make.
-        # Especially because I don't ~know~ that they would fill up 1,000 entries either.
-
         ## Refactor
         # I repeat myself a lot, particularly in class Program.
         # Non-violent errors, like a malformed user request, should print a message with an exitProgram() method.
@@ -325,6 +325,12 @@ class Program:
         #   New Computer Savings --> New Computer Purchase*
         #
         # The first 3 listed accounts are displayed below the projections on the default view, or all of them upon request.
+        #
+        # Account Fields:
+        #   Name        : What the account is.
+        #   ID          : Unique identifier.
+        #   Amount      : Funds currently held.
+        #   Limit       : Stops taking funds after this amount.
 
         ## Savings Affects Net-Total
         # Gives me a better snapshot picture of my financial standing.
@@ -1020,18 +1026,18 @@ class Program:
 
     ## Generates a new ID for a new income/expense object.
     def newID(self):
-        if len(self.IDs) < 999:
+        if len(self.IDs) < 9999:
             done = False
             while not done:
-                newID = random.randint(1,1000)
+                newID = random.randint(1,10000)
                 done = True
                 for ID in self.IDs:
                     if int(ID) == newID:
                         done = False
                         break
-            return "{:03d}".format(newID)
+            return "{:04d}".format(newID)
         else:
-            raise Exception("There are no available IDs to give out; update code to allow 4 digits?")
+            raise Exception("There are no available IDs to give out; update code to allow more?")
     
     ## Searches for a given ID, returning the object and its index, or [None, None] if it could not be found
     def searchByID(self, s):
@@ -1071,6 +1077,33 @@ class Program:
     ## Returns true if the number of arguments given to the program equals n
     def assertArgNum(self, n):
         return len(argv) == n
+
+
+
+
+
+
+
+
+
+
+
+class SavingsAccount:
+
+    def __init__(self):
+        self.name = ''
+        self.id = ''
+        self.amount = 0
+        self.limit = 0
+
+    def fromString(self, s):
+        # Separate the string
+        s = s.split('?')    # TODO This part
+
+        self.name = s[0]
+        self.id = s[1]
+        self.amount = int(s[2])
+        self.limit = int(s[3])
 
 
 
@@ -1126,7 +1159,7 @@ class Expense:
 
         # Confirm all fields have legal values.
         if (self.fields[Terms.NAME] != "" and
-            between(int(self.fields[Terms.ID]), 0, 1000) and
+            between(int(self.fields[Terms.ID]), 0, 10000) and
             Period.valid(self.fields[Terms.PERIOD]) and
             self.fields[Terms.DDATE].valid()):
             t2 = True
@@ -1144,7 +1177,7 @@ class Expense:
 
     @staticmethod
     def displayWidth():
-        return 61       # Would be nice, I guess, to calculate this.
+        return 62       # Would be nice, I guess, to calculate this.
 
     ## Returns a formatted line containing all the information this object has
     def displayAllStr(self):
