@@ -1680,11 +1680,18 @@ def between(n, min, max):
 # Compares two comparable items, and returns -1, 0 or 1 according to a's ordering relative to b.
 # If you're going to use this in __gt__() or any of its kind, ONLY USE ON SUBTYPES to avoid infinite loops!
 def compare(a, b):
+    if type(a) != type(b):
+        raise ValueError("Recieved mixed arguments of type {} and {}".format(typename(a), typename(b)))
     return 0 if a == b else (1 if a > b else -1)
 
 # debug feature
 def log(s):
     print(s)
+
+# Returns the object's class name only, not it's accessor.
+# Useful only if accessor is trivial.
+def typename(obj):
+    return type(obj).__name__
 
 ## Here's the epics:
 program = Program()
