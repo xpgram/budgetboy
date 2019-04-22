@@ -244,6 +244,19 @@ class Program:
         # Add a save? boolean which prevents saving when something goes wrong, and then
         # try to keep exiting in the middle of the program to a minimum.
 
+        ## What-If Mode
+        # A projection feature.
+        # For when I want to make a lot of edits to my budget, but I don't want to save those edits.
+        # Starts a loop, which accepts input just like the shell script does, and runs the run() command on it.
+        # Changes are held in memory, and save() is never run.
+        # A few new commands: exit / done  - Ends the simulation
+        #                     whatif / sim - (In Bash) Starts the simulation.
+
+        ## Export Command
+        # Copies the datafile to a new location, which may be given, but will default to the user's desktop.
+        # Saves me the trouble of opening %localappdata% and finding it by hand.
+        # Also a quick-n-easy permanent-backup feature.
+
         ## Holding Area
         # Financial Events that are past-due are kept in a little container for ~10 days, or maybe just 7
         # A figurative container; the display simply doesn't advance them until after this 7-day holding period.
@@ -1650,7 +1663,7 @@ class Keywords:
 def within(n, min, max):
     return (n >= min and n <= max)
 
-# Retruns true if n is in the interval min to max, exclusive
+# Returns true if n is in the interval min to max, exclusive
 def between(n, min, max):
     return (n > min and n < max)
 
