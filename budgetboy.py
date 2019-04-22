@@ -1109,6 +1109,16 @@ class SavingsAccount:
         self.amount = 0
         self.limit = 0
 
+    def __eq__(self, o):
+        return (self.name == o.name and
+            self.id == o.id and
+            self.amount == o.amount and
+            self.limit == o.limit)
+
+    def compare(self, o):
+        return compare(self.name, o.name)
+
+
     def fromString(self, s):
         # Separate the string
         s = s.split('?')    # TODO This part
@@ -1666,6 +1676,11 @@ def within(n, min, max):
 # Returns true if n is in the interval min to max, exclusive
 def between(n, min, max):
     return (n > min and n < max)
+
+# Compares two comparable items, and returns -1, 0 or 1 according to a's ordering relative to b.
+# If you're going to use this in __gt__() or any of its kind, ONLY USE ON SUBTYPES to avoid infinite loops!
+def compare(a, b):
+    return 0 if a == b else (1 if a > b else -1)
 
 # debug feature
 def log(s):
