@@ -244,6 +244,11 @@ class Program:
         # Add a save? boolean which prevents saving when something goes wrong, and then
         # try to keep exiting in the middle of the program to a minimum.
 
+        ## Implement sqlite3 library in save/load methods.
+        # Much easier to write, and probably much more robust than I have time to devote.
+        # Ultimately saves me the trouble of designing a string writer/reader, which is one of the most
+        # annoying parts of the save/load process. Actually, it is the save/load process.
+
         ## What-If Mode
         # A projection feature.
         # For when I want to make a lot of edits to my budget, but I don't want to save those edits.
