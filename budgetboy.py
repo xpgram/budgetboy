@@ -313,6 +313,15 @@ class Program:
         # allow the user to separate them with the word 'to'
         # Configure the projection-display method to take in two dates, one of them defaulting to the current date.
 
+        ## 'Pay' Command Update
+        # Should not let you 'pay' bills which are beyond 14 days from today.
+        # Should have a passthrough tag to allow modifying these items with explicit intent.
+        # budgetboy pay 1131
+        # budgetboy pay -u 1131
+        # 
+        # This is a command-line program, pressing up-arrow and accidentally 'paying' the same item twice is too easy.
+        # This prevents that. But, for things which I have certainly payed far in advance, the passthrough '-u' still lets me.
+
         ## Give Fincancial Objects A New Field: StartDate
         # If I'm going to allow rolling the clock back, I should prevent objects from affecting the budget before they existed.
         # StartDate, DueDate, and TermDate give me all the information I need to know the beginning, next-occurrence and end of a bill.
@@ -659,19 +668,18 @@ class Program:
 
     ## Advances a budget item's date, item targeted by its ID
     def advanceItemDate(self):
-        # payed [ID]
-        # -p [ID]
-        #           "pays" the ID'd bill (or income; they're the same object)
-        #           All this actually does is roll the object's DDate one period back
         if not self.assertArgNum(3):
             print('Could not advance item date: malformed request.')
             print()
             exit()
         
         item, idx = self.searchByID(argv[2])
+        unlockDate = self.curDate + Time(days=14)   # Prevents "paying" a regular bill 3 months in advance.
+                                                    # Problem. What about singular payments being payed early?
+                                                    # TODO Really, there should be a payed -u command which skips this check.
         
         # Inform the user, and also do the thing
-        if item:
+        if item and item.fields[Terms.DDATE] > unlockDate:
             oldDate = item.fields[Terms.DDATE].clone()
             item.rollForward()
             newDate = item.fields[Terms.DDATE].clone()
@@ -679,8 +687,10 @@ class Program:
             itemName = item.fields[Terms.NAME]
             # Why am I doing this?
             print(itemID + "  " + itemName + "    : " + oldDate.get() + " --> " + newDate.get())
-        else:
+        elif not item:
             print("An item with the ID " + argv[2] + " could not be found.")
+        else:
+            print('Date for Item ID ' + item.fields[Terms.ID] + ' could not be advanced: too far out. Use -u to unlock.')
         print() # Final spacer
 
     ## Adds a termination date to an object, object by ID
@@ -1057,7 +1067,7 @@ class Program:
         # Make sure search string is correct
         try:
             int(s)
-            if len(s) != 3:
+            if len(s) != 4:
                 raise Exception()
         except Exception:
             print("Search ID is malformed, cannot complete.")
