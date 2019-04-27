@@ -20,6 +20,7 @@ In the future, it will do these things:
  - Allow setup of savings sums which can be 'auto-deposited into' or 'withdrawn from' to simulate what you ought to be doing in real life.
  - Display a condensed, itemized budget instead of the calendar view for long periods of time.
  - Have a help screen.
-   In addition to several QOL adjustments I plan on making.
+ 
+ In addition to several QOL adjustments I plan on making.
    
  This script, obviously, does not handle your money for you. It's simply a planning tool.
