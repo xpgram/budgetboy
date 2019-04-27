@@ -2,10 +2,6 @@
 
 A simple CLI program.
 
-Well..
-
-It was simple.
-
 It keeps track of your bills, your earnings, and your balance, as well as allowing you to project your budget into the future showing you what you could earn in so much time if you'd stop spending it on dumb.
 
 Currently, it does these things:
