@@ -243,6 +243,7 @@ class Program:
         # Common messages, like [ID]  [Name]  [Field_old] --> [Field_new] should have a standard method()
         # Add a save? boolean which prevents saving when something goes wrong, and then
         # try to keep exiting in the middle of the program to a minimum.
+        # Move seperate classes into their own modules/files like I did with Passwordboy.
 
         ## Implement sqlite3 library in save/load methods.
         # Much easier to write, and probably much more robust than I have time to devote.
@@ -295,6 +296,22 @@ class Program:
         #   'inert' only means the bill does not affect the 'live' budget extending from today.
         #   This is also useful for suspending a bill temporarily, though you will have to remember to come back and turn it on,
         #   or when projecting into the future, it might allow you to see what your budget could look like without a certain payment.
+
+        ## Due-Soon Queue Area
+        # Now that I'm locking down the 'pay' option to prevent accidents, I should add a visual which lets you know which
+        # items are actionable without the 'unlock' option.
+        # Also, it would be nice to have something to "clean up," something that feels satisfying to empty.
+        # I wanna get dat serotonin for being responsible, ya dig.
+        #
+        #   Mar 20, 2019
+        #   
+        #   Due:
+        #   541  Mar 21  Health Insurance           -$116
+        #   253  Mar 22  Phonebill                   -$96
+        #
+        #   Upcoming:
+        #   724  Jun 15  Rent                       -$300
+        #   994  Jun 20  Loan: Tech Academy         -$200
 
         ## Auto-Events
         # New field: auto
