@@ -2,7 +2,7 @@
 
 A simple CLI program.
 
-It keeps track of your bills, your earnings, and your balance, as well as allowing you to project your budget into the future showing you what you could earn in so much time if you'd stop spending it on dumb.
+It keeps track of your bills, your earnings, and your balance, as well as allowing you to project your budget into the future, showing you what you could earn in so much time if you'd stop spending it on dumb.
 
 It's written in Python, but it's trivial to setup a shell script which does the extra/redundant typing for you. I'll probably include one in this repository at some point.
 
