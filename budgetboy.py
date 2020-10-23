@@ -1,1731 +1,1314 @@
-import sys
-import os
-import random
 from datetime import date
 from datetime import datetime
-from enum import Enum
+from datetime import timedelta
+from calendar import monthrange
+import sys
+import os
+import shlex
+import json
+import re
+import random
+import copy
 
-## Search 'TODO' for tasks that need completin' or considerin'
+# TODO Readjust display to fit 20.20 names. Increase amount width, for instance.
 
-# Globals
-argv = sys.argv
+# TODO It just occurred to me, separate accounts as they're implemented don't accomplish much.
+# If I make $600 on payday, deposited into General, then I have a $50 deposit into "New PC",
+# "New PC" never deducts itself from my paycheck. Essentially, I "make" $650, which isn't true.
+# I mean, a workaround is to make the "New PC" "savings" account negative, which is semi-sensible
+# since it'll eventually be an expense anyway, I guess. Yeah.
+# I might think about fixing it if I were publishing, but eh.
 
-class Program:
+# TODO Rewrite the Forecast to display in two columns?
+# It can get pretty long.
 
-    def __init__(self):
-        dt = datetime.now()
-        self.curDate = DueDate(dt.day, dt.month, dt.year)
-        self.projectionDate = self.curDate + Time(months=4)     # Projection date... 4 months I think is a dev-test
 
-        self.separatorChar = '`'
-        self.IDs = []
-        self.budgetItems = []
-        self.account = []           # TODO
-                                    # This feature needs to save accounts, maybe at the top.
-                                    # It needs to read accounts appropriately.
-                                    # Historical account ~always~ exists.
-                                    # 
+helptext = """
+By default, the script will print a 30-day calendar extending from today's date.
 
-        # TODO This only works for windows, currently
-        # Attempt to create the userdata directory, if one doesn't already exist.
-        datafolderPath = "%LOCALAPPDATA%\\budgetboy"
-        datafolderPath = os.path.expandvars(datafolderPath)
+A note on reading the display:
+
+541  Aug 24* Phonebill            **          -$90
+ID   Due     Name              Important    Amount
+
+Asterisks (*) denote final payments when next to dates, automatic payments when
+next to a period length, and "importance" when double-printed. "Important" expenses
+are always printed, even when outside the forecast window, to remind of their
+existence.
+
+Commands:
+
+Project Budget          project "Oct 9", project "Jan 1, 2021"
+    Prints an itemized list of all expenses between today and the given date.
+    A date string without a year is assumed to be of this year.
+    Will fail if the given date is in the past.
+
+List All Objects        all
+    Displays in list form all details about all expenses and all accounts.
+
+Enable Free-Editing     playground
+    Enables continuous-polling and disables saving, allowing free edits of the
+    budget while preserving the current one.
+
+Re-Enable Saving        enable-saving
+    While free-editing, this command signals that the script should save all
+    changes upon closure of the script.
+
+Script Closure          done
+    While free-editing, requests the script be closed. Closure must occur this
+    way if the script is to save any changes.
+
+Declare Payment         pay 132 015 ...,  pay 132 15 ...
+    Every listed ID which refers to an expense object will add its sum to its
+    linked account and strike its earliest date due from the calendar.
+
+Undo Payment            undo-pay 132 015 ...,  pay 132 15 ...
+    Reverses the last payment of every listed ID refering to an expense object.
+
+Add a New Expense       add ...
+    Adds a new expense to the record. The command may be followed with:
+
+    Set Name                "a string"
+        Expenses must have a name.
+
+    Set Value               700, +700, $700
+        Value must be nonzero. Always assumed to be negative without a preceeding '+'.
+
+    Set Account             acc 141, account 15
+        Value will auto-convert to a 3-length ID ('0'-left-padded), but must be numeric only.
+        Account will only be set if the given ID refers to an existing account object.
+
+    Set Date Due            "Aug 7, 2020" "Aug 7" — Some other formats are acceptable.
+        The due date is 'today' by default.
+
+    Set Period Start        start [date]
+        The due date supercedes the start date setting in all contexts and start date will be
+        changed to reflect this; start <= due <= termination must be true.
+        
+    Set Period End          term [date], terminate [date]
+        None by default. An expense with no termination date simply extends forever.
+        If due-date is set after the term-date, the addition or edit will fail.
+
+    Set Important           important, always-show, *, **
+        Declares the expense is always displayed on the calendar.
+        Useful for large, far-off payments.
+
+    Unset Important         common, forecast-show
+        Default value for importance.
+
+    Set Automatic           auto, automatic, autopay
+        Declares the expense is never overdue and will auto-pay on its due-date.
+
+    Unset Automatic         manual, manualpay
+        Default value for automatic.
+
+    Set Recurrence Period   [varies]
+        The intermission value between payments of this expense. May have the value:
+        s, singular, once, one-time     (Default)
+        w, week, weekly
+        b, biweek, biweekly
+        m, month, monthly
+        y, year, yearly, annual
+
+Add a New Account       new-account ...
+    Adds a new account to the record. The command may be followed with:
+
+    Set Name                "a string"
+        Accounts must have a name.
+
+    Set Value               700, +700, $700
+        For consistency, always assumed to be negative without preceeding '+'.
+        0 by default.
+
+Change an Object        edit 143 ...
+    Reopens the object with the given ID for editing. Rules for editing depend
+    on whether the object is an expense or an account. See above.
+
+Delete an Object        del 143 015 ...,  del 143 15 ...
+    Every listed ID which refers to an existing object is printed and then deleted
+    from the record. Expenses linked to accounts that are to be deleted are first
+    relinked to the general account before account deletion.
+"""
+
+
+####################################################################################################
+#### Regex Patterns                                                                             ####
+####################################################################################################
+
+regex_currency = r'^(?!.*[\-\+]{2})[\-\+\$]{0,2}?\d+$'      # Matches '100', '-100', '+$100' and '$+100'
+
+
+####################################################################################################
+#### General, Helpful Functions                                                                 ####
+####################################################################################################
+
+####################################################################################################
+#### Debug Convenience Methods
+
+show_debug_messages = True
+
+def log(s=''):
+    "Prints a suppressable message to the console."
+    if show_debug_messages:
+        print('DEBUG: ' + str(s))
+
+
+####################################################################################################
+#### General Convenience Methods
+
+def constrain(n, n_min, n_max):
+    "Returns n as limited to the range [n_min, n_max]."
+    assert n_min <= n_max, "Minimum range must be less than or equal to maximum."
+    return min(n_max, max(n, n_min))
+
+
+####################################################################################################
+#### Dictionary and List Convenience Methods
+
+def shift(a):
+    "Returns the first value of array a and the remaining values as a new list, or None and [] if a was empty to begin with."
+    v = a[0] if len(a) > 0 else None
+    a = a[1:]
+    return (v, a)
+
+def get(i, a):
+    "Returns the value held under index i of array a if one exists, returns None if not."
+    return a[i] if i >= 0 and i < len(a) else None
+
+def find_key(f, d):
+    "Returns the key to dictionary d where f( d[k] ) returns True, returns None otherwise."
+    results = [k for k, v in d.items() if f(v) == True]
+    return results[0] if results else None
+
+def string_to_int(s):
+    "Converts a given string to a number, or returns None on failure."
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return None
+
+def destructure(dict, *keys):
+    "Returns a list of values for the given keys in the order they appear as arguments to this function."
+    if (t := type(keys[0])) == list or t == tuple:
+        keys = keys[0]
+    return [dict[key] for key in keys]
+
+
+####################################################################################################
+#### Date functions
+
+def date_tostring(d):
+    "Converts a date object to a formatted string."
+    return d.strftime('%b %d, %Y')
+
+def date_fromstring(s):
+    "Converts a formatted string to a date object."
+    return datetime.strptime(s, '%b %d, %Y').date()
+
+def parse_date(s):
+    "Returns a date object parsed from a string s, or returns None if one couldn't be retrieved."
+    result = None
+    patterns = (
+        '%b %d, %Y',
+        '%b %d',
+        '%m-%d-%y',
+        '%m-%d-%Y',
+        '%m-%d'
+        )
+    for pattern in patterns:
         try:
-            os.mkdir(datafolderPath)
-        except OSError:
+            result = datetime.strptime(s, pattern).date()
+            break
+        except ValueError:
             pass
-        
-        # The path to the program's datafile
-        self.datafilePath = datafolderPath + "\\budgetboy_data"
-        
-    def run(self):
-        print()             # First spacer, separates the shell command line from the output
-        self.load()         # Loads all the data that there is
-        self.update()       # Updates the list of data with the current date
-        self.sort()         # Sorts the list of data by relevance (soonest and largest due)
-        self.userInput()    # Interprets user arguments, does something
-        self.clean()        # Cleans the list of data of invalid or broken entries, warning the user
-        self.save()         # Saves the final list of data to a file, backing up the old one
-
-    # Saves the list of bills and income in a handy-dandy file
-    def save(self):
-        self.backup()
-
-        ## Open the data file
-        f = open(self.datafilePath, 'w')
-
-        ## Write all header fields into one line using the separator char.
-        for term in Terms:
-            f.write(str(term) + program.separatorChar)
-        f.write("\n")
-
-        ## Write each budget item as a line, following the format of the header fields, using the separator char.
-        for b in self.budgetItems:
-            for term in Terms:
-                f.write(str(b.fields[term]) + program.separatorChar)
-            f.write("\n")
-        
-        ## Close the data file
-        f.close()
-
-    # Backs up the "old" datafile before saving a new one.
-    def backup(self):
-        ## Open 'from' file and 'to' file
-        try:
-            r = open(self.datafilePath, 'r')
-        except FileNotFoundError:
-            return      # Nothing to do here
-        
-        w = open(self.datafilePath + "_bk", 'w')
-
-        ## Back 'em up
-        for line in r.readlines():
-            w.write(line)
-
-        ## Close
-        r.close()   # (Close)
-        w.close()   # close the file
-
-    def load(self):
-        ## Open the datafile
-        try:
-            f = open(self.datafilePath, 'r')
-        except FileNotFoundError:
-            return      # Nothing to read here
-        
-        ## read first line, should be the DB header
-        line = f.readline()
-        if not line:
-            return      # No point in loading an empty file
-        
-        ## verify its terms are.. correct?
-        for term in Terms:
-            if line.find(str(term)) == -1:  # TODO I guess I should demand they also be the only fields... I dunno.
-                raise Exception("File appears to be corrupt: file content does not match expected format.")
-        
-        ## Break the header line into discrete pieces
-        n = 0
-        columnNames = []
-        line = line[0:line.find('\n')]
-        while n < len(line):
-            columnNames.append(line[n:line.find(self.separatorChar, n)])
-            n = line.find(self.separatorChar, n) + len(self.separatorChar)
-        
-        ## Iterate over the proceeding lines, parsing them by the separator char
-        ## (Also, remove the \n before iteration)
-        line = f.readline()
-        while line:
-            line = line[0:line.find('\n')]
-            e = Expense()
-            
-            ## Add each piece of data to the dictionary key associated.
-            n = 0
-            for i in range(0, len(columnNames)):
-                term = Terms.fromString(columnNames[i])
-                e.fields[term] = line[n:line.find(self.separatorChar, n)]
-                n = line.find(self.separatorChar, n) + len(self.separatorChar)
-            
-            # Reconfigure strings into their prospective types
-            try:
-                # AMOUNT
-                e.fields[Terms.AMOUNT] = int(e.fields[Terms.AMOUNT])
-
-                # DDATE
-                dd = DueDate()
-                dd.fromString(e.fields[Terms.DDATE])
-                e.fields[Terms.DDATE] = dd
-
-                # TDATE, which may be 'None' anyway
-                if e.fields[Terms.TDATE] != 'None':
-                    td = DueDate()
-                    td.fromString(e.fields[Terms.TDATE])
-                else:
-                    td = None
-                e.fields[Terms.TDATE] = td
-
-                # PERIOD and IMPORTANT
-                e.fields[Terms.PERIOD] = Period.fromString(e.fields[Terms.PERIOD])
-                e.fields[Terms.IMPORTANT] = (e.fields[Terms.IMPORTANT] == "True")
-            except ValueError:
-                print(">> " + e.fields[Terms.DDATE] + " : " + e.fields[Terms.NAME] + " : " + e.fields[Terms.AMOUNT])
-                raise Exception("This object did not read correctly from memory. Check datafile for corruption?")
-                    # TODO This should never happen, but it would be cool if I passed this object to
-                    # a list of misfits, and then displayed that list of troublemakers to the user,
-                    # which is ~kind of~ what I'm doing here, I suppose.
-            
-            # Verify the object, and add it to memory
-            if e.valid():
-                self.IDs.append(e.fields[Terms.ID])
-                program.budgetItems.append(e)
-            else:
-                print(">> " + e.displayStr())
-                raise Exception("Data is corrupt; this item did not validate correctly.")
-
-            # Continue dat while loop
-            line = f.readline()
-
-        # Finish
-        f.close()
-
-    ## Cleans the list of expenses of invalid or broken entries. Notifies the user by printing everything
-    # known about these items in-line.
-    def clean(self):
-        toRemove = []       # List of all budgetItem elements to delete (by index)
-        silentRemove = []   # The same, but without report; reason for deletion is innocuous.
-
-        # Iterate through the entire list of budget items
-        for i in range(0, len(self.budgetItems)):
-            item = self.budgetItems[i]
-
-            # If they self-report as invalid, report to the user and mark for deletion
-            if item.valid() == False:
-                s = "Deleted >> "
-                for term in Terms:
-                    s = s + str(item.fields[term]) + " : "
-                s = s[0:len(s)-2]
-                print(s)
-                toRemove.append(i)
-            
-            # If the item is a one-time event, just omit the TDATE, ggezuz
-            if item.fields[Terms.PERIOD] == Period.Singular:
-                item.fields[Terms.TDATE] = None
-
-            # If the item has not been relevant for longer than 1 year, delete silently.
-            if (item.fields[Terms.TDATE] != None and
-                item.fields[Terms.TDATE] < (self.curDate - Time(years=1))):
-                silentRemove.append(i)
-            # One-time payments will be removed by their DDATEs
-            elif (item.fields[Terms.PERIOD] == Period.Singular and
-                item.fields[Terms.DDATE] < (self.curDate - Time(years=1))):
-                silentRemove.append(i)
-
-        # Report to the user how many items were deleted, and delete them.
-        if len(toRemove) > 0:
-            print("Removed {} broken budget items.".format(len(toRemove)))
-            print()
-            for r in toRemove:
-                self.budgetItems.pop(r)
-        
-        # Silently delete old listings
-        for r in silentRemove:
-            self.budgetItems.pop(r)
-
-    ## Sorts the list by their duedate (soonest), then amount (biggest), then name.
-    ## Well, the .compare() method does.
-    def sort(self):
-        if len(self.budgetItems) > 1:
-            for i in range(1, len(self.budgetItems)):
-                k = i
-                j = i - 1
-                while j > -1 and self.budgetItems[k].compare(self.budgetItems[j]) == -1:
-                    tmp = self.budgetItems[j]
-                    self.budgetItems[j] = self.budgetItems[k]
-                    self.budgetItems[k] = tmp
-                    j -= 1
-                    k -= 1
-    
-    ## Update due dates to their next occurrence from the present
-    def update(self):
-        for item in self.budgetItems:
-            if (item.fields[Terms.PERIOD] != Period.Singular and
-                item.expired() == False):
-                while item.fields[Terms.DDATE] < self.curDate:
-                    item.rollForward()
-
-    ## Interprets the user's arguments to the program as actionable.. actions.
-    def userInput(self):
-        # TODO bby wrk on ths
-        # Implement Feature List:
-
-        ## Refactor
-        # I repeat myself a lot, particularly in class Program.
-        # Non-violent errors, like a malformed user request, should print a message with an exitProgram() method.
-        # Common messages, like [ID]  [Name]  [Field_old] --> [Field_new] should have a standard method()
-        # Add a save? boolean which prevents saving when something goes wrong, and then
-        # try to keep exiting in the middle of the program to a minimum.
-        # Move seperate classes into their own modules/files like I did with Passwordboy.
-
-        ## Implement sqlite3 library in save/load methods.
-        # Much easier to write, and probably much more robust than I have time to devote.
-        # Ultimately saves me the trouble of designing a string writer/reader, which is one of the most
-        # annoying parts of the save/load process. Actually, it is the save/load process.
-
-        ## What-If Mode
-        # A projection feature.
-        # For when I want to make a lot of edits to my budget, but I don't want to save those edits.
-        # Starts a loop, which accepts input just like the shell script does, and runs the run() command on it.
-        # Changes are held in memory, and save() is never run.
-        # A few new commands: exit / done  - Ends the simulation
-        #                     whatif / sim - (In Bash) Starts the simulation.
-
-        ## Export Command
-        # Copies the datafile to a new location, which may be given, but will default to the user's desktop.
-        # Saves me the trouble of opening %localappdata% and finding it by hand.
-        # Also a quick-n-easy permanent-backup feature.
-
-        ## Holding Area
-        # Financial Events that are past-due are kept in a little container for ~10 days, or maybe just 7
-        # A figurative container; the display simply doesn't advance them until after this 7-day holding period.
-        # Lets me know what I may have missed recently; what if something is due on the 4th but I check it on the 5th?
-        # Looks like this:
-        #
-        #   Mar 05, 2019
-        #
-        #   Overdue:
-        #   541  Mar 01  Health Insurance           -$116
-        #   253  Mar 02  Phonebill                   -$96
-        #   365          Dental Insurance            -$20
-        #
-        #   724  Mar 15  Rent                       -$300
-        #   994  Mar 20  Loan: Tech Academy         -$200
-        #
-        #                             Net Total:      +$6
-        #
-        # I will have to change the update() function.
-        # I will have to add a new clause to the display() functions.
-        # This works better after adding "History Affects Net-Total"
-        # Financial objects will not post their amounts to the historical account until after the 7-day holding period (it is
-        #   assumed I wouldn't skip a payment), or when I pass the '-p'/'payed' command to their ID.
-        #
-        # Issue:
-        # One-time events will be held in the holding area too.
-        # 'budgetboy -p [ID]' just rolls duedates forward in time.
-        # How do I remove a payed one-time expense from the holding area?
-        #   [Create new field: Flag inert]      Simply denotes that a Financial object is no longer active.
-        #   When projecting into the past or future, the inert flag can be ignored if desired.
-        #   'inert' only means the bill does not affect the 'live' budget extending from today.
-        #   This is also useful for suspending a bill temporarily, though you will have to remember to come back and turn it on,
-        #   or when projecting into the future, it might allow you to see what your budget could look like without a certain payment.
-
-        ## Due-Soon Queue Area
-        # Now that I'm locking down the 'pay' option to prevent accidents, I should add a visual which lets you know which
-        # items are actionable without the 'unlock' option.
-        # Also, it would be nice to have something to "clean up," something that feels satisfying to empty.
-        # I wanna get dat serotonin for being responsible, ya dig.
-        #
-        #   Mar 20, 2019
-        #   
-        #   Due:
-        #   541  Mar 21  Health Insurance           -$116
-        #   253  Mar 22  Phonebill                   -$96
-        #
-        #   Upcoming:
-        #   724  Jun 15  Rent                       -$300
-        #   994  Jun 20  Loan: Tech Academy         -$200
-
-        ## Auto-Events
-        # New field: auto
-        # Any event (singular, monthly, income, etc.) marked auto=True is not held in the overdue area, it simply rolls its ddate forward.
-        # Events that are not marked auto=True should have something visual, an 'm' for manual, maybe, posted somewhere in the display.
-
-        ## Add New Command: duedate
-        # budgetboy -dd 01-30-2020
-        # Changes an item's duedate.
-        # I thought this wouldn't make sense, but it hurts nothing to add it, and it will occasionally be useful:
-        #   When I have entered the wrong date for a new item
-        #   When a one-time event is delayed to a later date
-
-        ## Itemized Budget Display
-        # I think I will rescind its presence on the default view.
-        # But, when projecting over a long period of time, this view compacts the view-space.
-        # Something over 45-days should auto-pick this display type.
-
-        ## Allow User/Program to Project from DATE to DATE
-        # the 'proj' command accepts date and time arguments
-        # allow the user to separate them with the word 'to'
-        # Configure the projection-display method to take in two dates, one of them defaulting to the current date.
-
-        ## 'Pay' Command Update
-        # Should not let you 'pay' bills which are beyond 14 days from today.
-        # Should have a passthrough tag to allow modifying these items with explicit intent.
-        # budgetboy pay 1131
-        # budgetboy pay -u 1131
-        # 
-        # This is a command-line program, pressing up-arrow and accidentally 'paying' the same item twice is too easy.
-        # This prevents that. But, for things which I have certainly payed far in advance, the passthrough '-u' still lets me.
-
-        ## Give Fincancial Objects A New Field: StartDate
-        # If I'm going to allow rolling the clock back, I should prevent objects from affecting the budget before they existed.
-        # StartDate, DueDate, and TermDate give me all the information I need to know the beginning, next-occurrence and end of a bill.
-        # When creating a new fincancial object, the startdate is always the same as the duedate.
-        # This can be changed with the 'startdate' or '-sd' command, I guess.
-
-        ## Itemized Budget Display is used for Date-to-Date projections
-        # When showing a list of what happened in Apr, or from 2019 to 2020, use the Itemized Display.
-        # This necessarily refers to projections which roll the clock to any time before or after the current day.
-
-        ## Add Savings Accounts
-        # Financial Events (Expense Objects) can be linked to these accounts
-        # Financial Events apply the negative of their amounts to whichever accounts they are linked to
-        # They apply the negative because their actual amounts are considered additions to and from the net-total per period
-        # A 'Savings Deposit' has the value -$100 FROM the net-total, but a +$100 to the savings account
-        # This will specifically be handled in the update() and payItem() methods so as not to affect the projection feature
-        # I may use a link-table, event IDs to accounts IDs (which share the 0-999 ID space) to achieve this simply
-        # Otherwise, I can add a new field to Expense objects; events probably(?) shouldn't link to more than one account anyway.
-        #
-        # Purpose:
-        #   General Savings <-- Monthly Savings Deposit
-        #   New Computer Savings <-- New Computer Savings Deposit
-        #   New Computer Savings --> New Computer Purchase*
-        #
-        # The first 3 listed accounts are displayed below the projections on the default view, or all of them upon request.
-        #
-        # Account Fields:
-        #   Name        : What the account is.
-        #   ID          : Unique identifier.
-        #   Amount      : Funds currently held.
-        #   Limit       : Stops taking funds after this amount.
-
-        ## Savings Affects Net-Total
-        # Gives me a better snapshot picture of my financial standing.
-        # If I have $1500 saved up for whatever reason, this should reflect on my monthly net-total.
-        # Particularly, this prevents me from entering the red when I ought not to be.
-        # Not all savings accounts need reflect on the monthly total: some are savings for purchases and should be considered "spent".
-        # This blends with 'History' below because a 'savings deposit' fincancial event will necessarily add to its linked account,
-        #   but subtract from the historical account as a payment.
-
-        ## History Affects Net-Total
-        # I can use a savings account, at least a default one, to capture net-totals month to month.
-        # This prevents the acquisition of a paycheck from ceasing to influence the net-total.
-        # The net total, in this case, just builds on itself month after month
-        # Here is a visual of the problem:
-        #   234  Apr 01  Paycheck           +$900
-        #   256  Apr 02  Phonebill          -$500
-        #   411  Apr 03  Teeth Ins.          -$20
-        #                     Net Total     +$380
-        #
-        #   256  Apr 02  Phonebill          -$500
-        #   411  Apr 03  Teeth Ins.          -$20
-        #                     Net Total     -$520       This says I'm in the red, but that isn't true.
-        # I can do this with a "savings" account, I think... but I would have to be really careful about double-booking fees.
-        # I guess that wouldn't be too hard if I just held the previous month (or calculated it) and posted it to the gen.savings at the end.
-        # I would need a by-month net calculator that returns the +/- drift for that month alone.
-        # Or, I think this was intended, just post each financial event to a global 'history-account' that keeps track of everything.
-        # Geez. I knew there was a simpler solution.
-
-        ## History Corrections
-        # A new command: 
-        #   budgetboy -h
-        # This affects the historical savings account (I only keep a history of 1-year).
-        # Simply adds the given number to the historical savings account total.
-        # This will often be called with negative numbers, I imagine; historical drift will probably occur mostly from
-        #   small, miscellaneous payments unrecorded in the app.
-        # [budget -h -200] as a statement simply means that I have $200 less than the app thinks I do.
-        # This action creates a financial one-time event labelled 'Historical Correction' with the given amount and a DDATE of TODAY,
-        #   just for record purposes.
-        
-        ## Add a help screen
-        # budgetboy help
-        # display all the commands
-
-        ## New PayPeriod
-        # A thought: what about monthly periods like "3rd Thu of the Month"?
-        # I'm not concerned, but still. Depends on how monthly salaries are distributed, really. I have no idea.
-
-        ## Use The Internet
-        # Concieve of some handy way to let my desktop and laptop communicate with each other so's I don't always have to
-        # open one or the other to look at my stuff.
-
-        ## Luxury Tallying in Itemized Budget Display
-        # Financial events have a new field: the 'luxury' flag (or 'miscellaneous')
-        # Luxury items are one-time payments, usually entered the day of.
-        # They are only meant to add up against the month's net total.
-        # Their purpose is to account for non-small purchases that may grossly affect my end-of-the-month net totals.
-        # Luxury items have names, but are displayed in aggregate in the Itemized Budget display, like this:
-        #   If I bought 2 video games, expensive chocolate, and a concert ticket, those should be displayed as:
-        #   ---   x4  Miscellaneous                 -$210
-        # Consolidating 4 items isn't much of a big deal. It might even be more useful to list all 4 of them individually.
-        # This feature will be useful when the number approaches x10 and above, and listing all these items becomes visually sloppy.
-
-        ## Blend Dates Together
-        # To declutter the view-space, do this:
-        #   741  Apr 19  Regular Deposit            -$100
-        #   520  Apr 21* Large Yu-Gi-Oh! Playset   -$1700
-        #   130  May 01  Health Insurance           -$116
-        #   798          Teeth Insurance             -$20
-        #   100          The Tech Academy       ** -$1750
-        #   454  May 04  Phonebill                   -$96
-        #   333        * Payment to Harry             -$7
-        #
-        # Just blank out the dates we already know. The star at the bottom looks a little silly, but whatevs.
-        
-        ## Estimated Objects
-        # Intended to declutter the view-space
-        # 'Transportation' is not an item which is deducted monthly or weekly, it is deducted in small amounts throughout.
-        # So, display it differently.
-        # The DueDate and Period still help determine when and how these items affect the budget
-        # But they're set aside and shown in aggregate outside of the Bill-Event view
-        # Maybe like this:
-        #   741  Apr 19  Regular Deposit            -$100
-        #   520  Apr 21* Large Yu-Gi-Oh! Playset   -$1700
-        #   130  May 01  Health Insurance           -$116
-        #
-        #   210  Jun 01* The Tech Academy       ** -$1750       These naturally don't count; they're just reminders
-        #
-        #   131  --- x3  Food                       -$120       These do, though, so that's confusing.
-        #   141  -- x20  Transportation             -$250
-        #   ---  --- x4  Luxury                     -$210
-        #
-        #                     Net Total 30-days:    +$641
-
-        if len(argv) < 2:      # If 'budgetboy' is the only argument: Default View
-            # Block 1: Display 1-month forward, list all expenses as events
-            self.d_eventListProjection(Time(days=30))
-
-            # Find the first of the current relevant month
-            start = self.curDate.clone()
-            if start.day > 25: start + Time(months=1)   # Advance the month forward once this month is almost over
-            start.day = 1
-
-            # Find the last of the current relevant month
-            end = start.clone()
-            end.day = Month.length(end.month)
-
-            # Block 2: Display an itemized budget for the current relevant month
-            self.d_itemizedProjection(start, end)
-
-        elif len(argv) >= 2:
-            # Add a new expense object
-            if argv[1] in Keywords.AddExpense:
-                self.addItem()
-
-            # Add a new 'income' object
-            elif argv[1] in Keywords.AddIncome:
-                self.addItem(True)
-
-            # Remove an expense object by its ID
-            elif argv[1] in Keywords.Remove:
-                self.removeItem()
-
-            # Roll an expense object's date forward, by its ID
-            elif argv[1] in Keywords.PayEvent:
-                self.advanceItemDate()
-
-            # Add a termination date to an object, by its ID
-            elif argv[1] in Keywords.TerminateEvent:
-                self.terminateItem()
-
-            # Toggles an expense object's 'important' flag, by ID
-            elif argv[1] in Keywords.ToggleImportance:
-                self.toggleItemImportance()
-            
-            # TODO Sets an expense object's 'important' flag to true, by ID
-            # TODO Sets an expense object's 'important' flag to false, by ID
-
-            # Changes the name of an expense object, by ID
-            elif argv[1] in Keywords.SetName:
-                self.changeItemName()
-            
-            # Change the amount of an expense object, by ID
-            elif argv[1] in Keywords.SetAmount:
-                self.changeItemAmount()
-
-            # Display normally, with the budget projected out from the current day
-            elif argv[1] in Keywords.FinancialProjection:
-                self.userProjection()
-
-            # List items in the budget by a given string, or list all
-            elif argv[1] in Keywords.FilteredListAllBudgetItems:
-                self.listItems()
-            
-            # List all items in the budget
-            elif argv[1] in Keywords.ListAllBudgetItems:
-                self.listAll()
-
-            # Provides a helpful help screen
-            elif argv[1] in Keywords.Help:
-                self.displayHelp()
-
-            # Default case
-            else:
-                print('Actionable command not understood: ' + argv[1])
-                print()
-
-    ## Adds a new expense object to the global list
-    # 'income' determines the sign of the amount field, and is for the command addi specifically.
-    def addItem(self, income=False):
-        # Arguments must be between 5 and 7 inclusive
-        argNum = len(argv)
-        if argNum < 5 or argNum > 7:
-            print("Item could not be added: malformed request.")
-            print()
-            return
-
-        # Collect user input. Provide feedback if incorrect.
-        name = argv[2]
-        amt = self.parseAmount(argv[3], income)
-        date = self.parseDate(argv[4])
-        prd = Period.Monthly
-        impt = False
-        for i in range(5, argNum):
-            prd = self.parsePeriod(argv[i])
-            impt = self.parseImportance(argv[i])
-
-        # Generate a unique ID for the new expense object
-        newid = self.newID()
-        self.IDs.append(newid)
-
-        # Build a new expense object
-        fields = {}
-        fields[Terms.NAME] = name
-        fields[Terms.ID] = newid
-        fields[Terms.AMOUNT] = amt
-        fields[Terms.DDATE] = date
-        fields[Terms.TDATE] = None
-        fields[Terms.PERIOD] = prd
-        fields[Terms.IMPORTANT] = impt
-
-        expense = Expense(fields)
-
-        # Inform the user it was successful, and add it.
-        print(expense.displayStr())
-        print("New expense object successfully added.")
-        print()
-
-        self.budgetItems.append(expense)
-
-    ## Parses a string for an expense amount
-    def parseAmount(self, s, income=False):
-        if len(s) == 0:
-            return None
-
-        # 'income' labels what kind of 'expense' this amount is. This is given by the program.
-        # An '+' or an '-' found in the string forces one or the other.
-        if s.find('+') != -1:
-            income = True
-            s = s.replace('+', '', 1)
-        elif s.find('-') != -1:
-            income = False
-            s = s.replace('-', '', 1)
-
-        # Remove one '$' if the user (was stupid enough! Ha! Take that user!) included one
-        # TODO The user can't submit $'s anyway.
-        if s.find('$'):
-            s = s.replace('$', '', 1)
-
-        try:
-            amt = int(s)
-        except ValueError:
-            print("Item could not be added: the amount integer could not be parsed.")
-            print()
-            exit()
-        
-        amt = abs(amt)  # I dunno. Users are weird.
-        return amt if income else -amt
-    
-    ## Parse a string for a date object
-    def parseDate(self, s):
-        # Dates can be given:
-        #   MM-DD-YYYY
-        #   MM-DD-yy
-        #   MM-DD       Year assumed: this
-        #   DD          Month and year assumed: this
-        #  '[name] 6'       Year assumed: this
-        #  '[name] 6 2019'
-        # TODO I will try harder later. Right now, only MM-DD-YYYY is accepted.
-
-        # I can at least add support for MM-DD
-        if len(s) == 5:
-            s = s + '-' + str(self.curDate.year)
-
-        try:
-            date = DueDate()
-            date.fromString(s)
-        except ValueError:
-            print("Item could not be added: the date integers could not be parsed.")
-            print()
-            exit()
-        except Exception:
-            print("Item could not be added: date object did not fit MM-DD-YYYY")
-            print()
-            exit()
-        
-        return date
-
-    ## Parse a string for a Period.Value
-    def parsePeriod(self, s):
-        kw_singular = ['s', 'singular', 'one-time', 'once']
-        kw_weekly = ['w', 'weekly', '7']
-        kw_biweekly = ['b', 'biweekly', 'bi-weekly', '14']
-        kw_monthly = ['m', 'monthly']
-        kw_annually = ['y', 'a', 'yearly', 'annually', 'annual']
-        full_list = [kw_singular, kw_weekly, kw_biweekly, kw_monthly, kw_annually]
-        repr_list = [Period.Singular, Period.Weekly, Period.BiWeekly, Period.Monthly, Period.Annually]
-
-        for i in range(0, len(full_list)):
-            for w in full_list[i]:
-                if w == s.lower():
-                    return repr_list[i]
-        
-        return Period.Monthly       # No terms found, return the default
-
-
-    ## Parse a string for an 'Important' flag
-    def parseImportance(self, s):
-        r = False
-        keywords = ['*', '**', 'star', 'starred', 'mark', 'marked', 'important', 'always-show']
-        for k in keywords:
-            if k == s.lower():
-                r = True
-        return r
-
-    ## Removes an item by its ID
-    def removeItem(self):
-        # Assert argument length
-        if not self.assertArgNum(3):
-            print('Could not delete item: malformed request.')
-            print()
-            exit()
-        
-        item, idx = self.searchByID(argv[2])
-
-        # Inform the user
-        if item:
-            self.budgetItems.pop(idx)
-            print(item.displayStr())
-            print("This item has been deleted.")
-        else:
-            print("An item with the ID " + argv[2] + " could not be found.")
-        print() # Final spacer
-
-    ## Advances a budget item's date, item targeted by its ID
-    def advanceItemDate(self):
-        if not self.assertArgNum(3):
-            print('Could not advance item date: malformed request.')
-            print()
-            exit()
-        
-        item, idx = self.searchByID(argv[2])
-        unlockDate = self.curDate + Time(days=14)   # Prevents "paying" a regular bill 3 months in advance.
-                                                    # Problem. What about singular payments being payed early?
-                                                    # TODO Really, there should be a payed -u command which skips this check.
-        
-        # Inform the user, and also do the thing
-        if item and item.fields[Terms.DDATE] > unlockDate:
-            oldDate = item.fields[Terms.DDATE].clone()
-            item.rollForward()
-            newDate = item.fields[Terms.DDATE].clone()
-            itemID = item.fields[Terms.ID]
-            itemName = item.fields[Terms.NAME]
-            # Why am I doing this?
-            print(itemID + "  " + itemName + "    : " + oldDate.get() + " --> " + newDate.get())
-        elif not item:
-            print("An item with the ID " + argv[2] + " could not be found.")
-        else:
-            print('Date for Item ID ' + item.fields[Terms.ID] + ' could not be advanced: too far out. Use -u to unlock.')
-        print() # Final spacer
-
-    ## Adds a termination date to an object, object by ID
-    def terminateItem(self):
-        if not self.assertArgNum(4):
-            print('Could not add termination date: malformed request.')
-            print()
-            exit()
-        
-        item, idx = self.searchByID(argv[2])
-        date = self.parseDate(argv[3])
-
-        # Inform the user, and also do the thing
-        if item:
-            oldDate = 'None'
-            if item.fields[Terms.TDATE] != None:
-                oldDate = item.fields[Terms.TDATE].clone().getFull()
-            newDate = date.getFull()
-            itemID = item.fields[Terms.ID]
-            itemName = item.fields[Terms.NAME]
-            
-            item.fields[Terms.TDATE] = date
-            print(itemID + '  ' + itemName + '    : ' + oldDate + " --> " + newDate)
-        else:
-            print("An item with the ID " + argv[2] + " could not be found.")
-        print()
-
-    ## Toggles an expense item's 'important' flag, searched for by ID
-    def toggleItemImportance(self):
-        if not self.assertArgNum(3):
-            print('Could not toggle item importance: malformed request.')
-            print()
-            exit()
-        
-        item, idx = self.searchByID(argv[2])
-
-        if item:
-            flag = item.fields[Terms.IMPORTANT]
-            item.fields[Terms.IMPORTANT] = not flag
-            itemID = item.fields[Terms.ID]
-            itemName = item.fields[Terms.NAME]
-
-            print(itemID + '  ' + itemName + '    : ' + ('marked' if not flag else 'unmarked'))
-        else:
-            print("An item with the ID " + argv[2] + " could not be found.")
-            # TODO I really repeat myself a lot here, don't I?
-        print()
-
-
-    ## Changes an expense item's name, searched for by ID
-    def changeItemName(self):
-        if not self.assertArgNum(4):
-            print('Could not update item name: malformed request.')
-            print()
-            exit()
-        
-        item, idx = self.searchByID(argv[2])
-        newName = argv[3]
-
-        if item:
-            oldName = item.fields[Terms.NAME]
-            item.fields[Terms.NAME] = newName
-            itemID = item.fields[Terms.ID]
-
-            print(itemID + '  ' + oldName + '    -->    ' + newName)
-        else:
-            print("An item with the ID " + argv[2] + " could not be found.")
-        print()
-
-    ## Changes an expense item's amount, serached for by ID
-    def changeItemAmount(self):
-        if not self.assertArgNum(4):
-            print('Could not update item amount: malformed request.')
-            print()
-            exit()
-        
-        item, idx = self.searchByID(argv[2])
-
-        if item:
-            newVal = self.parseAmount(argv[3], item.amount() >= 0)
-            oldAmount = item.amountStr()
-            item.fields[Terms.AMOUNT] = newVal
-            newAmount = item.amountStr()
-            itemID = item.fields[Terms.ID]
-            itemName = item.fields[Terms.NAME]
-
-            print(itemID + '  ' + itemName + '    : ' + oldAmount + ' --> ' + newAmount)
-        else:
-            print("An item with the ID " + argv[2] + " could not be found.")
-        print()
-
-    # Displays an event-list projection of the budget from the current day to a day given by the user
-    def userProjection(self):
-        time = Time()
-
-        # Attempt to parse time in the format #d #m #y
-        for i in range(2, len(argv)):
-            s = argv[i]
-            c = s[ len(s)-1 : len(s) ]      # Get the last character
-            s = s[ 0 : len(s)-1 ]           # Omit the last character
-            if c == 'd' and time.day == 0:  # Consider only the first 'd' argument
-                time.day = int(s)
-            if c == 'm' and time.month == 0:
-                time.month = int(s)
-            if c == 'y' and time.year == 0:
-                time.year = int(s)
-        if time.day == 0 and time.month == 0 and time.year == 0:
-            time = None
-        
-        # If that didn't work, attempt to parse time in MM-DD-YYYY format
-        if time == None and self.assertArgNum(3):
-            date = self.parseDate(argv[2])
-
-            # If the user dumb, just give up
-            if date <= self.curDate:
-                print('Cannot project backwards.')
-                print()
-                exit()
-
-            d = date.day - self.curDate.day
-            m = date.month - self.curDate.month
-            y = date.year - self.curDate.year
-            time = Time(days=d, months=m, years=y)
-
-        # Clearly we're broken
-        if time == None:
-            print('Could not create projection: malformed request.')
-            print()
-            exit()
-
-        # Finally, display until the end of 'time'
-        if time:
-            self.d_eventListProjection(time)
-
-    ## Lists all items in the budget so long as they contain a search string
-    def listItems(self):
-        if self.assertArgNum(2):
-            self.listAll()
-            return
-        
-        expenses = self.copyList()
-        expenses = self.sortList(expenses)
-        successful = False
-
-        # Display any items which match any argv[idx] with idx >= 2
-        for exp in expenses:
-            match = False
-
-            for i in range(2, len(argv)):
-                if exp.fields[Terms.ID] == argv[i]:
-                    match = True
-                    break
-                if exp.fields[Terms.NAME].lower().find(argv[i].lower()) != -1:
-                    match = True
-                    break
-            
-            if match:
-                print(exp.displayAllStr())
-                successful = True
-        
-        # If a list was produced, do nothing, but if one wasn't, apologize profusely
-        if not successful:
-            print("No items found.")
-
-        print() # Final spacer
-
-    ## Lists all items in the budget
-    def listAll(self):
-        if not self.assertArgNum(2):
-            print("Too many arguments: did you mean to do something different?")
-            print()
-            exit()
-
-        expenses = self.copyList()
-        expenses = self.sortList(expenses)
-        
-        for item in expenses:
-            print(item.displayAllStr())
-        print()
-
-    ## Sort a list of Expense objects by expiry, then by amount, then name
-    # This sort method has a different result and a different use case from self.sort()
-    def sortList(self, ls):
-        # Deep copy
-        expenses = []
-        for i in ls:
-            expenses.append(i.clone())
-
-        # Sort
-        for i in range(1, len(expenses)):
-            k = i
-            j = i - 1
-
-            # The block I have down there.
-            # I know.
-            # My head hurts right now.
-            # I wish it weren't so stupid.
-            # TODO Make it not stupid.
-            while j > -1:
-                swap = False
-                # Expired items filter to the bottom
-                if expenses[j].expired() and not expenses[k].expired():
-                    swap = True
-                elif not expenses[j].expired() and expenses[k].expired():
-                    swap = False
-                # Positive items filter to the top
-                elif expenses[j].amount() < 0 and expenses[k].amount() >= 0:
-                    swap = True
-                elif expenses[j].amount() >= 0 and expenses[k].amount() < 0:
-                    swap = False
-                # Smaller amounts filter to the bottom
-                elif abs(expenses[j].amount()) < abs(expenses[k].amount()):
-                    swap = True
-                elif abs(expenses[j].amount()) > abs(expenses[k].amount()):
-                    swap = False
-                # Sort remaining alphabetically
-                elif expenses[j].fields[Terms.NAME] > expenses[k].fields[Terms.NAME]:
-                    swap = True
-                
-                if swap:
-                    tmp = expenses[k]
-                    expenses[k] = expenses[j]
-                    expenses[j] = tmp
-                
-                j = j - 1
-                k = k - 1
-
-        # Done
-        return expenses
-
-    ## Displays an at-a-glance of the coming bills (within 30 days)
-    # timeLength should be a Time object
-    # Does not have a clock roll-back feature because that's not what this is for.
-    def d_eventListProjection(self, timeLength):
-        endDate = self.curDate + timeLength     # The time-window we are considering.
-        expenses = self.copyList()              # Exists so that changes to item dates do not reflect on the actual list.
-        netTotal = 0
-        width = Expense.displayWidth()
-
-        print(self.curDate.getFull())
-        print()
-
-        done = False
-        while not done:
-            # Find the next, soonest expense
-            nxt = None
-            idx = None
-            for i in range(0, len(expenses)):
-                if expenses[i].fields[Terms.DDATE] <= endDate:
-                    if nxt == None or nxt > expenses[i]:
-                        nxt = expenses[i]
-                        idx = i
-
-            # If an event is expired, omit its presence            
-            if nxt is not None and nxt.expired():
-                expenses.pop(idx)
-                continue
-
-            # Display the next, soonest expense, if one was found, and roll its date forward
-            if nxt != None:
-                print(nxt.displayStr())
-                nxt.rollForward()
-                netTotal += nxt.amount()    # Tally up
-                if nxt.fields[Terms.PERIOD] == Period.Singular:
-                    expenses.pop(idx)       # If event is one-time, stop considering
-            # However, if one wasn't found, stop looking
-            else:
-                done = True
-        
-        print() # Spacer
-
-        # Print any '**' important items outside the time-window in a separate block
-        block2 = False
-        for i in range(0, len(self.budgetItems)):
-            if self.budgetItems[i].fields[Terms.IMPORTANT]:
-                if self.budgetItems[i].fields[Terms.DDATE] > endDate:
-                    print(self.budgetItems[i].displayStr())
-                    block2 = True
-
-        if block2: print() # Spacer
-
-        # Final Statement: Financial Net Total
-        s = '{:>' + str(width-10) + '}  '
-        s = s.format("Net total for {}projection:".format("30-day " if timeLength.day == 30 else ''))
-        sign = '+' if netTotal > 0 else '-'
-        s = s + "{:>8}".format(sign + "$" + str(abs(netTotal)))
-        print(s)
-
-        print() # Final Spacer
-
-    ## Displays an itemized "receipt" of all expenses and incomes from the startDate to the endDate
-    # startDate and endDate should be DueDate objects
-    def d_itemizedProjection(self, startDate, endDate):
-        pass
-        # print("Itemized Budget (" + self.getPeriod(startDate, endDate) + ")")
-        # print(self.horizontalRule())
-
-        # TODO WHEN YOU WRITE THE WHILE-LOOP, REMEMBER TO OMIT SINGULARS AND EXPIREDS
-        # YOU FUCKIN IDIOT
-
-        # TODO
-        # This one is gonna have to do some stuff:
-        #   It needs a list of expense objects, and their count
-        #   It needs to print its own version of Expense.display()
-        #     with the net-total of all its occurrences
-
-    ## Returns a string detailing a time-period's start to end in a nice format
-    def getPeriod(self, start, end):
-        # Get all string displays / add a space for auto-format
-        m1 = Month.name(start.month) + ' '
-        d1 = str(start.day) + ' '
-        y1 = str(start.year) + ' '
-        m2 = Month.name(end.month) + ' '
-        d2 = str(end.day) + ' '
-        y2 = str(end.year) + ' '
-        sep = '- '
-
-        # Years are the same
-        if (start.year == end.year):
-            # years are omitted
-            y1 = ''
-            y2 = ''
-            # start.day is omitted if it's the first
-            if start.day == 1:
-                d1 = ''
-            # end.day is omitted if it's the last
-            if end.day == Month.length(end.month):
-                d2 = ''
-            # end.month is omitted if it's the same, but not if day isn't
-            if d2 == '' and end.month == start.month:
-                m2 = ''
-        # Years are different
-        else:
-            # day is omitted if it's the first
-            if start.day == 1:
-                d1 = ''
-            if end.day == 1:
-                d2 = ''
-            # month is omitted if it's Jan, but not if day isn't
-            if d1 == '' and start.month == 1:
-                m1 = ''
-            if d2 == '' and end.month == 1:
-                m2 = ''
-        # sep is omitted if end is completely omitted
-        if d2 == '' and m2 == '' and y2 == '':
-            sep = ''
-        
-        # Return the built string
-        s = m1 + d1 + y1 + sep + m2 + d2 + y2
-        return s[0:len(s)-1]        # Removes the trailing space
-
-    ## Displays a handy, dandy, candy.. shows you help information
-    def displayHelp(self):
-        pass
-        # TODO Show stuff
-
-    ## Generates a new ID for a new income/expense object.
-    def newID(self):
-        if len(self.IDs) < 9999:
-            done = False
-            while not done:
-                newID = random.randint(1,10000)
-                done = True
-                for ID in self.IDs:
-                    if int(ID) == newID:
-                        done = False
-                        break
-            return "{:04d}".format(newID)
-        else:
-            raise Exception("There are no available IDs to give out; update code to allow more?")
-    
-    ## Searches for a given ID, returning the object and its index, or [None, None] if it could not be found
-    def searchByID(self, s):
-        # Make sure search string is correct
-        try:
-            int(s)
-            if len(s) != 4:
-                raise Exception()
-        except Exception:
-            print("Search ID is malformed, cannot complete.")
-            print()
-            exit()
-        
-        item = None
-        idx = None
-
-        # Perform the search
-        for i in range(0, len(self.budgetItems)):
-            if self.budgetItems[i].fields[Terms.ID] == s:
-                item = self.budgetItems[i]
-                idx = i
-        
-        # Be careful not to accept None as a result
-        return item, idx
-
-    ## Deep copies the expense list and returns it
-    def copyList(self):
-        l = []
-        for item in self.budgetItems:
-            l.append(item.clone())
-        return l
-
-    ## Returns a string of '=' equal in length to the width of the display area
-    def horizontalRule(self):
-        return '=' * Expense.displayWidth()
-
-    ## Returns true if the number of arguments given to the program equals n
-    def assertArgNum(self, n):
-        return len(argv) == n
-
-
-
-
-
-
-
-
-
-
-
-class SavingsAccount:
-
-    def __init__(self):
-        self.name = ''
-        self.id = ''
-        self.amount = 0
-        self.limit = 0
-
-    def __eq__(self, o):
-        return (self.name == o.name and
-            self.id == o.id and
-            self.amount == o.amount and
-            self.limit == o.limit)
-
-    def compare(self, o):
-        return compare(self.name, o.name)
-
-
-    def fromString(self, s):
-        # Separate the string
-        s = s.split('?')    # TODO This part
-
-        self.name = s[0]
-        self.id = s[1]
-        self.amount = int(s[2])
-        self.limit = int(s[3])
-
-
-
-
-
-
-
-
-
-
-class Expense:
-
-    def __init__(self, fields=None):
-        if fields == None:
-            self.fields = {}
-        else:
-            self.fields = fields
-        
-    def __eq__(self, o):
-        if o is None: return False
-        return self.compare(o) == 0
-
-    def __gt__(self, o):
-        return self.compare(o) == 1
-    
-    def __ge__(self, o):
-        return self.compare(o) > -1
-
-    def __lt__(self, o):
-        return self.compare(o) == -1
-
-    def __le__(self, o):
-        return self.compare(o) < 1
-
-    # Returns true if all required fields are filled in and with correct data.
-    def valid(self):
-        t1 = False
-        t2 = False
-
-        # TDATE isn't critical, so if it's invalid, just get rid of it.
-        if (type(self.fields[Terms.TDATE]) != DueDate or
-            self.fields[Terms.TDATE].valid() == False):
-            self.fields[Terms.TDATE] == None
-
-        # Confirm all fields are the correct type.
-        if (type(self.fields[Terms.NAME]) == str and
-            type(self.fields[Terms.ID]) == str and
-            type(self.fields[Terms.AMOUNT]) == int and
-            type(self.fields[Terms.PERIOD]) == Period and
-            type(self.fields[Terms.DDATE]) == DueDate and
-            type(self.fields[Terms.IMPORTANT]) == bool):
-            t1 = True
-
-        # Confirm all fields have legal values.
-        if (self.fields[Terms.NAME] != "" and
-            between(int(self.fields[Terms.ID]), 0, 10000) and
-            Period.valid(self.fields[Terms.PERIOD]) and
-            self.fields[Terms.DDATE].valid()):
-            t2 = True
-
-        return t1 and t2
-
-    # Returns a formatted line considered this expense object's 'formal display'
-    # Full width = 56
-    def displayStr(self):
-        s = '' + self.fields[Terms.ID] + '  '
-        s = s + self.fields[Terms.DDATE].get(self.lastPayment()) + ' '
-        s = s + '{:35.35}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ') + '  '
-        s = s + "{:>8}".format(self.amountStr())
-        return s
+    if result != None:
+        if result.year == 1900:     # Just assume a year wasn't provided; I got no relationship with 1900
+            result = result.replace(year=date.today().year)
+    return result
+
+
+####################################################################################################
+#### Other parsing functions
+
+def parse_idnumber(s, l=3):
+    "Given a numerical string s, returns a zero-padded string of length l."
+    r = '{0:0>{1}}'.format(s, l) if type(s) == str and s.isnumeric() else None
+    if not r:
+        print(f"String '{s}' could not be interpreted as an ID (length 3, numeric).")
+    return r
+
+def parse_amount(s):
+    "Given a currency string, extracts its numerical. Unsigned numbers are assumed to be expenses (negative)."
+    assert re.search(regex_currency, s), f"Cannot parse the string '{s}' for a currency amount: does not match regex."
+    s = s.replace('$','')
+    income = s.startswith('+')
+    return int(s) if income else -abs(int(s))
+
+
+####################################################################################################
+#### Enum Types                                                                                 ####
+####################################################################################################
+
+class Period():
+    "Labels for different lengths of periodic occurrence."
+    singular = 'One-Time'
+    weekly   = 'Weekly'
+    biweekly = 'Biweekly'
+    monthly  = 'Monthly'
+    annual   = 'Annual'
+
+
+####################################################################################################
+#### Expense Type                                                                               ####
+####################################################################################################
+
+def new_expense():
+    "Returns a new dictionary type with fields relevant to budgetary line-items."
+    duedate = date_tostring(date.today())
+    return {
+        'id': newID(),                  # String-copy of the key pointing to this object in the global index.
+        'name': '',                     # The name of this expense object.
+        'account': g_default_account_id,# None or string ID linking this expense to an estimation account.
+        'amount': 0,                    # The sum of this payment: negative are payments from the user, positive are to the user.
+        'period': Period.singular,      # Period length between payments — ~only~ describes duedate movement, not occurrence.
+        'duedate': duedate,             # The next unpaid date for this expense.
+        'startdate': duedate,           # Start of effective period
+        'termdate': duedate,            # End of effective period — set to startdate for non-recurring payments.
+        'automatic': False,             # Whether this payment requires manual initiation of payment.
+        'important': False,             # Whether this payment gets special treatment in the 30-day forecast.
+        'active': True                  # Whether this payment still affects the budget.
+    }
+
+####################################################################################################
+#### Supporting Methods
+
+class Expense():
 
     @staticmethod
-    def displayWidth():
-        return 62       # Would be nice, I guess, to calculate this.
+    def duedate(e):
+        "Returns a date object from the given expense dict's duedate field."
+        return date_fromstring(e['duedate'])
 
-    ## Returns a formatted line containing all the information this object has
-    def displayAllStr(self):
-        period = "One-Time"
-        if self.fields[Terms.PERIOD] != Period.Singular:
-            period = self.fields[Terms.PERIOD].name
-
-        s = '' + self.fields[Terms.ID] + '  '
-        s = s + '{:35.35}'.format(self.fields[Terms.NAME]) + (' **' if self.fields[Terms.IMPORTANT] else '   ') + '  '
-        s = s + "{:>8}".format(self.amountStr()) + '  '
-        s = s + "{:8}".format(period) + '  '
-        s = s + self.fields[Terms.DDATE].getFull(self.lastPayment())
-
-        if self.fields[Terms.TDATE] != None:
-            s = s + ' x  ' + self.fields[Terms.TDATE].getFull()
-
-        return s
-
-    # Returns this expense's amount as a string in currency format
-    def amountStr(self):
-        sign = '-' if self.fields[Terms.AMOUNT] < 0 else '+'
-        return sign + '$' + str(abs(self.fields[Terms.AMOUNT]))
-
-    # Returns this expense's amount as an int
-    def amount(self):
-        return self.fields[Terms.AMOUNT]
-    
-    # Rolls the due-date forward by one payperiod.
-    # 'budgetboy -p [name|id]' or 'budgetboy -rf [name|id]' do this as well, if the bill has been payed.
-    def rollForward(self):
-        if not self.expired():
-            self.fields[Terms.DDATE] = self.fields[Terms.DDATE].advancePeriod(self.fields[Terms.PERIOD])
-    
-    # Rolls the due-date backward by one payperiod.
-    # This function does not take into account real bill history, it only projects backward in time.
-    def rollBack(self):
-        self.fields[Terms.DDATE] = self.fields[Terms.DDATE].recedePeriod(self.fields[Terms.PERIOD])
-    
-    # This schedules the cancellation of a bill. If cancelled on its due-date, the bill is considered valid through the next payperiod.
-    # If the bill has passed its expiration, it will remain in the record for 1 year before being removed.
-    def terminateOn(self, date):
-        if not isinstance(date, DueDate):
-            raise TypeError("expected a DueDate object, got {}".format(type(date)))
-        b = False
-        if date.valid():
-            self.fields[Terms.TDATE] = date
-            b = True
-        return b
-    
-    # Used to revive a terminated bill that still exists in the record.
-    # Records are cleared of an expense 1 year after their termination date.
-    def revive(self):
-        if self.fields[Terms.PERIOD] == Period.Singular:
-            return      # This'll just cause an infinite-loop
-        
-        self.fields[Terms.TDATE] = None
-        while (self.fields[Terms.DDATE] < program.curDate):
-            self.rollForward()
-
-    # Returns True if this item has run its expiration date. The expiration date is the last date the bill is still valid.
-    def expired(self):
-        if self.fields[Terms.TDATE] == None:
-            return False
-        return self.fields[Terms.DDATE] > self.fields[Terms.TDATE]
-
-    # Returns true if this is the last occurrence of this payment, meaning the next period interval lies
-    # beyond the termination date.
-    def lastPayment(self):
-        if self.fields[Terms.PERIOD] == Period.Singular:
-            return True     # This is by-default the last payment
-        if self.fields[Terms.TDATE] is None:
-            return False    # This payment does not end
-        
-        last = False
-
-        # Must be valid ~and~ its advance must be invalid to be the last payment
-        date = self.fields[Terms.DDATE]
-        if (date <= self.fields[Terms.TDATE] and
-            date.advancePeriod(self.fields[Terms.PERIOD]) > self.fields[Terms.TDATE]):
-            last = True
-
-        return last
-    
-    # Returns true if the given var represents an instance of Expense (this class)
-    def verifyOther(self, other):
-        return isinstance(other, Expense)
-    
-    # Returns 1 if this object comes logically after the 'other' in ordering, -1 if before, 0 if indeterminate.
-    def compare(self, other):
-        if not self.verifyOther(other):
-            raise TypeError("expected {} object, recieved {}".format(type(self), type(other)))
-        val = 1 if self.expired() and not other.expired else (-1 if not self.expired and other.expired else 0)
-        if val == 0: val = self.fields[Terms.DDATE].compare(other.fields[Terms.DDATE])
-        if val == 0: val = 1 if self.fields[Terms.AMOUNT] > other.fields[Terms.AMOUNT] else (-1 if self.fields[Terms.AMOUNT] < other.fields[Terms.AMOUNT] else 0)
-        if val == 0: val = 1 if self.fields[Terms.NAME] > other.fields[Terms.NAME] else (-1 if self.fields[Terms.NAME] < other.fields[Terms.NAME] else 0)
-        return val
-    
-    # Returns a copy of this instance.
-    def clone(self):
-        e = Expense()
-        for term in Terms:
-            e.fields[term] = self.fields[term]
-        e.fields[Terms.DDATE] = self.fields[Terms.DDATE].clone()
-        if self.fields[Terms.TDATE] == None:
-            e.fields[Terms.TDATE] = None
-        else:
-            e.fields[Terms.TDATE] = self.fields[Terms.TDATE].clone()
-        return e
-    
-
-
-
-
-
-
-
-
-
-class DueDate:
-
-    def __init__(self, day=1, month=1, year=1):
-        self.day = day
-        self.month = month
-        self.year = year
-        self.assertValidity()
-    
-    def __str__(self):
-        return "{:02d}-{:02d}-{}".format(self.month, self.day, self.year)
-    
-    def __eq__(self, o):
-        if o is None:
-            return False
-        if not isinstance(o, DueDate):
-            raise TypeError("expected a DueDate object, recieved {}".format(type(o)))
-        day = self.effectiveDate()
-        oday = o.effectiveDate()
-        return day == oday and self.month == o.month and self.year == o.year
-        
-    def __gt__(self, o):
-        day = self.effectiveDate()
-        oday = o.effectiveDate()
-
-        if self.year != o.year:      b = self.year > o.year
-        elif self.month != o.month:  b = self.month > o.month
-        else:                        b = day > oday
-
-        return b
-        
-    def __ge__(self, o):
-        return self.__eq__(o) or self.__gt__(o)
-        
-    def __lt__(self, o):
-        day = self.effectiveDate()
-        oday = o.effectiveDate()
-
-        if self.year != o.year:      b = self.year < o.year
-        elif self.month != o.month:  b = self.month < o.month
-        else:                        b = day < oday
-        
-        return b
-    
-    def __le__(self, o):
-        return self.__eq__(o) or self.__lt__(o)
-    
-    def __add__(self, o):
-        d = self.clone()
-        d.addTime(o)
-        return d
-    
-    def __iadd__(self, o):
-        self.addTime(o)
-        return self
-    
-    def __sub__(self, o):
-        d = self.clone()
-        o = Time(days=(-o.day), months=(-o.month), years=(-o.year))
-        d.addTime(o)
-        return d
-    
-    def __isub__(self, o):
-        self.addTime(o)
-        return self
-    
-    def compare(self, o):
-        if not isinstance(o, DueDate):
-            raise TypeError("expected a DueDate object, recieved {}".format(type(o)))
-        return 1 if self > o else (-1 if self < o else 0)
-    
-    def clone(self):
-        d = DueDate(self.day, self.month, self.year)
-        return d
-
-    def fromString(self, s):
-        # expects 'xx-xx-xxxx'
-        ls = s.split('-')
-
-        if len(ls) != 3:
-            raise Exception("Cannot read date from string: str = " + s)
-
-        self.month = int(ls[0])
-        self.day = int(ls[1])
-        self.year = int(ls[2])
-
-        self.assertValidity()
-
-    def checkType(self, o):
-        if not isinstance(o, Time):
-            raise TypeError("expected a Time object, recieved {}".format(type(o)))
-    
-    def addTime(self, time):
-        self.checkType(time)
-
-        # Resolve months and years first.
-        self.year += time.year
-        self.month += time.month
-
-        # Overflow months-out-of-range into years
-        while self.month < Month.minimum:
-            self.month += Month.maximum
-            self.year -= 1
-        while self.month > Month.maximum:
-            self.month -= Month.maximum
-            self.year += 1
-        
-        # If days are being added/subtracted, then throw out the idealized date.
-        if time.day != 0:
-            self.day = self.effectiveDate() # Calc from a real point in time in the resulting month
-            self.day += time.day
-
-            # Overflow days-out-of-range into months into years
-            while self.day < Month.daysMin:
-                self.month -= 1
-                if self.month < Month.minimum:
-                    self.month = Month.maximum
-                    self.year -= 1
-                self.day += Month.length(self.month)
-            while self.day > Month.length(self.month):
-                self.day -= Month.length(self.month)
-                self.month += 1
-                if self.month > Month.maximum:
-                    self.month = Month.minimum
-                    self.year += 1
-        
-        # Enforce a minimum date; no A.C./B.C. here.
-        if self.year < 1:
-            self.year = 1
-            self.month = 1
-            self.day = 1
-
-    ## Throws an exception if, for whatever reason, this date object is illegitimate
-    def assertValidity(self):
-        if not self.valid():
-            raise Exception("Date object is malconfigured: {}".format(self))
-    
-    ## Allows me to project forward in time by relative due date
-    def advancePeriod(self, period):
-        d = self.clone()
-        if period == Period.Weekly:     d += Time(days=7)
-        elif period == Period.BiWeekly: d += Time(days=14)
-        elif period == Period.Monthly:  d += Time(months=1)
-        elif period == Period.Annually: d += Time(years=1)
-        return d
-
-    ## So that I can project backward, too, for whatever reason
-    def recedePeriod(self, period):
-        d = self.clone()
-        if period == Period.Weekly: d -= Time(days=7)
-        elif period == Period.BiWeekly: d -= Time(days=14)
-        elif period == Period.Monthly: d -= Time(months=1)
-        elif period == Period.Annually: d -= Time(years=1)
-        return d
-    
-    def get(self, star=False):
-        string = "{0} {1:02d}".format(Month.name(self.month), self.effectiveDate())
-        if star: string += '*'
-        else: string += ' '
-        return string
-    
-    def getFull(self, star=False):
-        string = self.get()
-        string = string[0:len(string)-1]        # Remove trailing space from get()
-        string = string + ', ' + str(self.year)
-        if star: string += '*'
-        else: string += ' '
-        return string
-    
-    # Returns a date limited by the current month length, but maintaining the current month
-    def effectiveDate(self):
-        return min(self.day, Month.length(self.month))
-
-    def valid(self):
-        b = False
-        if (between(self.year, 0, 10000) and
-            within(self.month, Month.minimum, Month.maximum) and
-            within(self.day, Month.daysMin, Month.daysMax)):
-            b = True
-        return b
-        
-
-
-
-
-
-
-
-
-
-class Time:
-    
-    def __init__(self, days=0, months=0, years=0):
-        self.day = days
-        self.month = months
-        self.year = years
-    
-    ## Frontloads all fields into one int value approximating the number of days each describes.
-    def lengthInDays(self):
-        return self.day + self.month*30 + self.year*365
-
-
-
-
-
-
-
-
-
-
-class Period(Enum):
-    Singular = 1
-    Weekly = 2
-    BiWeekly = 3
-    Monthly = 4
-    Annually = 5
-
-    # Return true if the given n can be associated with any legitimate value of Period
-    # I'll be honest, though, no idea when I used this.
     @staticmethod
-    def valid(n):
-        if type(n) == int:
-            return (within(n, 1, len(Period)))
-        elif type(n) == Period:
+    def startdate(e):
+        "Returns a date object from the given expense dict's startdate field."
+        return date_fromstring(e['startdate'])
+    
+    @staticmethod
+    def termdate(e):
+        "Returns a date object from the given expense dict's termdate field, or None."
+        return date_fromstring(e['termdate']) if e['termdate'] else None
+
+    @staticmethod
+    def firstpayment(e):
+        "Returns True if the given expense dict's duedate is its first duedate within its effective period."
+        duedate = date_fromstring(e['duedate'])
+        prevdate = regress_date(duedate, e['period'])
+        startdate = date_fromstring(e['startdate'])
+
+        return e['period'] == Period.singular or startdate > prevdate
+
+    @staticmethod
+    def lastpayment(e):
+        "Returns True if the given expense dict's duedate is its last duedate within its effective period."
+        if e['period'] == Period.singular:
             return True
         else:
-            raise Exception("Cannot validate parameter against enum values with {}".format(type(n)))
-    
-    # Return an Enum value equal to its name as a string
+            duedate = date_fromstring(e['duedate'])
+            nextdate = advance_date(duedate, e['period'])
+            termdate = date_fromstring(e['termdate']) if e['termdate'] else None
+            return termdate and termdate < nextdate
+
     @staticmethod
-    def fromString(s):
-        for p in Period:
-            if str(p) == s:
-                return p
-        return None
-    
+    def rollforward(e):
+        """Returns a copy of the given expense dict with its duedate rolled forward one period.
+        Fails if the duedate is the last for its period, or if the period is one-time."""
+        assert not Expense.lastpayment(e), f"Cannot roll date '{e['duedate']}' beyond its termination date '{e['termdate']}'."
+
+        new_e = e.copy()
+        duedate = Expense.duedate(new_e)
+        new_e['duedate'] = date_tostring(advance_date(duedate, new_e['period']))
+        return new_e
+
+    @staticmethod
+    def rollbackward(e):
+        """Returns a copy of the given expense dict with its duedate rolled backward one period.
+        Fails if the duedate is the first payment for its period, or if the period is one-time."""
+        assert not Expense.firstpayment(e), f"Cannot roll date '{e['duedate']}' beyond its starting date '{e['startdate']}'.'"
+
+        new_e = e.copy()
+        duedate = date_fromstring(new_e['duedate'])
+        new_e['duedate'] = date_tostring(regress_date(duedate, new_e['period']))
+        return new_e
+
+    @staticmethod
+    def pay(e):
+        """Renders the expense object effectual and routes its payment to its assigned account, then rolls
+        its date to next. If on lastpayment, object will deactivate. Inactive objects affect no accounts."""
+        new_e = e.copy()
+
+        # Setup fields for user feedback
+        ID, name, amount, duedate = destructure(new_e, 'id','name','amount','duedate')
+        amount = format_currency(amount)
+        nextdate = 'X'
+
+        if new_e['active']:
+            Account.adjust(new_e['account'], new_e['amount'])
+            if not Expense.lastpayment(new_e):
+                new_e = Expense.rollforward(new_e)
+                nextdate = new_e['duedate']
+            else:
+                new_e['active'] = False
+            g_index['expenses'][ID] = new_e
+            print(f"Payed:     {ID}  {name:20.20}  {amount:>12},  {duedate} —→ {nextdate}")
+        else:
+            print(f"No Change: {ID}  {name:20.20}  {amount:>12},  {duedate}")
+
+        # TODO Reorganize this.
+        # I slapped the print() feedback for pay() and unpay() together to get it working quickly.
+        # Maybe someday I will do it one better. Maybe not. Probably not.
+
+        return new_e
+
+    @staticmethod
+    def unpay(e):
+        """Renders the expense object ineffectual and unroutes its payment from its assigned account, then
+        rolls its date to previous. If on firstpayment and already active, nothing changes."""
+        new_e = e.copy()
+        firstpayment = Expense.firstpayment(new_e)
+
+        # Setup fields for user feedback
+        ID, name, amount, duedate = destructure(new_e, 'id','name','amount','duedate')
+        amount = format_currency(amount)
+        prevdate = 'X'
+
+        if not new_e['active'] or not firstpayment:
+            new_e['active'] = True
+            Account.adjust(new_e['account'], -new_e['amount'])
+            if not firstpayment:
+                new_e = Expense.rollbackward(new_e)
+                prevdate = new_e['duedate']
+            g_index['expenses'][ID] = new_e
+            print(f"Reverted:  {ID}  {name:20.20}  {amount:>12},  {prevdate} ←— {duedate}")
+        else:
+            print(f"No Change: {ID}  {name:20.20}  {amount:>12},  {duedate}")
+
+        return new_e
+
+    @staticmethod
+    def expand(e, days):
+        """Returns a generator object which yields all expense objects with duedates extending from its
+        current date through either its termination date or a date 'days' number of days beyond today."""
+        expense = e.copy()
+        end_date = date.today() + timedelta(days=days)
+        while Expense.duedate(expense) <= end_date:
+            yield expense
+            if not Expense.lastpayment(expense):
+                expense = Expense.rollforward(expense)
+            else:
+                break
+
+    @staticmethod
+    def compare_str(e):
+        "Returns a string which is imperfectly comprehensive, but meaningfully hashable."
+        expired = '1' if e['active'] else '0'
+        duedate = date_fromstring(e['duedate']).strftime('%Y%m%d')
+        amount = f"{(10**20-1) - abs(e['amount'])}"                 # This sorts by largest number first
+        name = e['name']
+
+        # String comparable
+        return f"{expired}{duedate}{amount}{name}"
 
 
+####################################################################################################
+#### Account Type                                                                               ####
+####################################################################################################
 
+def new_account():
+    "Returns a new dictionary type with fields relevant to savigns accounts."
+    ID = newID()
+    return {
+        'id': ID,
+        'name': '',
+        'balance': 0
+    }
 
+####################################################################################################
+#### Supporting Methods
 
+class Account():
 
-
-
-
-class Month:
-    maximum = 12
-    minimum = 1
-    daysMax = 31
-    daysMin = 1
-    names =   {0:'Nul', 1:'Jan', 2:'Feb', 3:'Mar', 4:'Apr', 5:'May', 6:'Jun', 7:'Jul', 8:'Aug', 9:'Sep', 10:'Oct', 11:'Nov', 12:'Dec'}
-    lengths = {names[0]:0, names[1]:31, names[2]:28, names[3]:31, names[4]:30, names[5]:31,
-               names[6]:30, names[7]:31, names[8]:31, names[9]:30, names[10]:31, names[11]:30,
-               names[12]:31}
-    
-    @classmethod
-    def name(cls, numeral):
-        if numeral < 1 or numeral > cls.maximum:
-            raise OverflowError("Value given is out of bounds; recieved {}".format(numeral))
-        return cls.names[numeral]
+    @staticmethod
+    def adjust(accID, amt):
+        "Affects the balance of the Account object referenced by accID to the amount of amt."
+        assert accID in g_index['accounts'], f"Cannot find account with ID '{accID}'."
+        g_index['accounts'][accID]['balance'] += amt
         
-    @classmethod
-    def length(cls, numeral):
-        if numeral < 1 or numeral > cls.maximum:
-            raise OverflowError("Value given is out of bounds; recieved {}".format(numeral))
-        return cls.lengths[cls.names[numeral]]
+        # TODO What is..? Rewrite this.
 
 
+####################################################################################################
+#### Time Manipulators                                                                          ####
+####################################################################################################
+
+####################################################################################################
+#### Functions
+
+def rolldate(d, period, regressing=False):
+    "Helper to advance_date and regress_date functions."
+
+    dirword = 'regress' if regressing else 'advance'
+    standardrange = (d.day <= 28)
+    leapday = (d.month == 2 and d.day == 29)
+    assert period != Period.singular, f"Cannot {dirword} a date by zero: irresponsible."
+    assert period != Period.monthly or standardrange, f"Cannot {dirword} a due-date by month with an ideal date of 29–31: information loss."
+    assert period != Period.annual or not leapday, f"Cannot {dirword} a due-date by year with an ideal date of Feb 29th: information loss."
+    # TODO These assertions should probably be formal exceptions.
+
+    # Calc month-range for month rolls
+    month = d.month if not regressing else (d.month - 1 if d.month != 1 else 12)
+    m_range = monthrange(d.year, month)[1]
+
+    # Calc year-range for annual rolls
+    year = d.year + 1*(-regressing)
+    day = min(d.day, monthrange(year, month)[1])
+    y_range = abs(d - date(year, d.month, day)).days
+
+    switcher = {
+        Period.singular: timedelta(days=0),
+        Period.weekly: timedelta(days=7),
+        Period.biweekly: timedelta(days=14),
+        Period.monthly: timedelta(days=m_range),
+        Period.annual: timedelta(days=y_range)
+    }
+    return d + switcher[period] if not regressing else d - switcher[period]
+
+def advance_date(d, period):
+    "Given a date and its recurrence period, returns the next occurrence date."
+    return rolldate(d, period)
+    
+def regress_date(d, period):
+    "Given a date and its recurrence period, returns the previous occurrence date."
+    return rolldate(d, period, regressing=True)
 
 
+####################################################################################################
+#### ID Management Functions                                                                    ####
+####################################################################################################
+
+def newID():
+    "Returns a 3-length numerical ID string not found in list IDs, or None if ID space is full."
+    IDs = list(g_index['accounts'].keys()) + list(g_index['expenses'].keys())
+    id = None
+    if len(IDs) < 1000:
+        potential = set(f'{i:0>3}' for i in range(0,1000))
+        used = set(IDs)
+        available = tuple(potential.difference(used))
+        idx = random.randint(0, len(available)-1)
+        id = available[idx]
+    return id
 
 
+####################################################################################################
+#### Print Functions                                                                            ####
+####################################################################################################
+
+displaystring = ['','']
+
+def printbuffer(s=''):
+    "'Prints' to an internal buffer string. Must be shown with displayBuffer()."
+    displaystring.insert(-1, s)
+
+def displaybuffer():
+    "Prints the internal buffer string to the console and clears the buffer."
+    global displaystring
+    if len(displaystring) > 2:
+        print('\n'.join(displaystring))
+    displaystring = ['','']
 
 
+####################################################################################################
+#### String Formatting
+
+def horizontalrule(length):
+    "Returns a string of '=' characters of some length."
+    return '='*length
+
+def format_currency(amt):
+    "Given an int, returns a formatted currency string."
+    sign = '-' if amt < 0 else '+'
+    return "{}${}".format(sign, str(abs(amt)))
+
+def format_expense(e):
+    "Returns a single-line string describing an expense object."
+    fields = ['id', 'name','important','amount','duedate']
+    ID, name, important, amount, duedate = destructure(e, fields)
+
+    date = duedate[:-6] # cuts the comma-year off
+    star = '*' if Expense.lastpayment(e) else ''
+    dblstar = '**' if important else ''
+    amtstr = format_currency(amount)
+
+    return f"{ID}  {date}{star:1} {name:20.20} {dblstar:2}  {amtstr:>12}"
+
+def format_expense_full(e):
+    "Returns a string describing all known information about an expense object."
+    fields = ['id', 'name','account','important','amount','period','duedate','startdate','termdate','automatic']
+    ID, name, account, important, amount, period, duedate, startdate, termdate, auto = destructure(e, fields)
+
+    dblstar = '**' if important else ''
+    amtstr = format_currency(amount)
+    crossdate = 'x' if termdate and termdate != startdate else ''
+    termdate_str = termdate if crossdate else ''
+    period += '*' if auto else ''
+
+    return f"{account} ←—  {ID}  {name:20.20} {dblstar:2}  {amtstr:>12}  {period:9}  {duedate} {crossdate} {termdate_str}"
+
+def format_account(a):
+    "Returns a single-line string describing an account object."
+    fields = ['id', 'name', 'balance']
+    ID, name, balance = destructure(a, fields)
+    amt_str = format_currency(balance)
+
+    return f"{ID}  {name:20.20}  {amt_str:>23}"
+
+def format_daterange(startstr, endstr):
+    "Given two date strings, returns their period as a formatted string emphasizing readability."
+    # If you'd like to know what I mean, produces strings of the form:
+    #   Feb – Apr           Mar, 2019 – Feb, 2020
+    #   Aug 01 – 26         Jan 16 – Dec 31
+    #   2019 – 2020         2020
+
+    start = date_fromstring(startstr)
+    end = date_fromstring(endstr)
+
+    assert start <= end, "Start date must precede end date to build date-range string."
+
+    syear, smonth, sday = start.strftime('%Y %b %d').split()
+    eyear, emonth, eday = end.strftime('%Y %b %d').split()
+
+    def monthend(d):
+        return monthrange(d.year, d.month)[1]
+
+    # Omit day numbers if they are the first and last of their respective months.
+    if start.day == 1 and end.day == monthend(end):
+        sday, eday = '',''
+
+    # Omit months if they are the first an last of their respective years ~and~ day numbers are omitted.
+    if start.month == 1 and end.month == 12 and not (sday and eday):
+        smonth, emonth = '',''
+
+    # Omit years if they are the same
+    if start.year == end.year:
+        syear, eyear = '',''
+    
+    # Omit end month if it is the same and year has already been omitted
+    if start.month == end.month and not eyear:
+        emonth = ''
+
+    # Assembly
+    def assemble_date_string(year, month, day):
+        parts = [
+            month,
+            ' ' if month and day else '',
+            day,
+            ', ' if month and year else '',
+            year
+        ]
+        return ''.join(parts)
+
+    # Gather date strings to assemble date-range string
+    startstring = assemble_date_string(syear,smonth,sday)
+    endstring = assemble_date_string(eyear,emonth,eday)
+    separator = '–' if endstring else ''
+
+    # The only way startstring is blank is if the period was from start to end for a single year.
+    if not startstring: startstring = start.strftime('%Y')
+
+    return ' '.join([startstring, separator, endstring])
 
 
-class Terms(Enum):
-    NAME = 0
-    ID = 1
-    AMOUNT = 2
-    DDATE = 3
-    TDATE = 4
-    PERIOD = 5
-    IMPORTANT = 6
+####################################################################################################
+#### Script Variables                                                                           ####
+####################################################################################################
 
-    def __str__(self):
-        return self.name
+# File path constants
+path_datafolder = os.path.expandvars('%LOCALAPPDATA%\\budgetboy')
+path_datafile = path_datafolder + '\\budgetboy_data'
+path_backupfile = path_datafolder + '\\budgetboy_backup'
 
-    # Return an Enum value equal to its own name as a string
-    @staticmethod
-    def fromString(s):
-        for term in Terms:
-            if str(term) == s:
-                return term
-        return None
+save_on_exit = True         # Whether to save changes to the working save file.
+last_datafile_string = ''   # Records the loaded save-data file before changes are made.
 
+# Global index of expense and account instances.
+g_index = {
+    'accounts': {},
+    'expenses': {}
+}
 
+# Default savings account
+g_default_account_id = '999'
 
+general_account = new_account()
+general_account['id'] = g_default_account_id
+general_account['name'] = 'General Account'
+g_index['accounts'][general_account['id']] = general_account
 
-
-
-
-
-
-
-class Keywords:
-    AddExpense = ['-a', 'add', 'new', 'expense']
-    AddIncome = ['-ai', 'addi', 'newi', 'income']
-    Remove = ['-r', 'rem', 'del']
-    PayEvent = ['-p', 'pay', 'payed']
-    SetName = ['-n', 'set-name']
-    SetAmount = ['-m', 'set-amount', 'set-amt']
-    SetDueDate = ['-dd', 'set-duedate', 'set-ddate']
-    TerminateEvent = ['-t', 'terminate', 'term', 'terminate-on', 'set-tdate']
-    ReviveTerminatedEvent = ['revive', 'set-tdate-none']
-    SetStartDate = ['set-startdate', 'set-sdate']
-    SetPeriod = ['-prd', 'set-period', 'set-interval']
-    ToggleImportance = ['-i', 'toggle-importance', 'toggle-mark', 'toggle-important']
-    SetImportant = ['mark', 'set-important', 'always-show']
-    SetUnimportant = ['unmark', 'set-common', 'natural-show']
-    ToggleInert = ['toggle-inert', 'toggle-suspend']
-    SetInert = ['set-inert', 'suspend']
-    SetActive = ['set-active', 'unsuspend']
-    ToggleAutoPay = []
-    SetAutoPay = []
-    SetManualPay = []
-    SetCategory = []        # Instead of setting a miscellaneous flag, why not set my own categories *including* miscellaneous?
-    SetNoCategory = []      # Then this one feature could encapsulate Misc., Food, Transport, and more.
-    SetDisplayAggregate = []    # Except 'Food' isn't a category, it's a hidden, recurring payment. So I need this, I guess.
-    SetDisplayOccurrence = []
-    SetAccountLink = []
-    SetNoAccountLink = []
-    FinancialProjection = ['proj', 'project']
-    FilteredListAllBudgetItems = ['-l', 'list']
-    ListAllBudgetItems = ['listall']
-    CorrectHistoricalRecord = []
-    CreateAccount = []
-    RemoveAccount = []
-    CorrectAccount = []
-    DisplayAccounts = []
-    Help = ['help']
+argv = sys.argv[1:]         # Passed in script arguments, minus the script's name
 
 
+####################################################################################################
+#### Open Script                                                                                ####
+####################################################################################################
+
+# Try to make the datafile directory if it does not exist
+try:
+    os.mkdir(path_datafolder)
+except OSError:
+    pass
+
+# Restore backedup old datafile if told to
+if get(0, argv) == 'restore-backup':
+    try:
+        with open(path_backupfile, 'r') as backup:
+            with open(path_datafile, 'w') as datafile:
+                save = backup.read()
+                datafile.write(save)
+        print('Backup data restored.')
+    except FileNotFoundError:
+        print('Failed: no backup file exists for budgetboy.')
+    finally:
+        exit()  # Force quit script
+
+# Open and read the datafile, if it exists
+try:
+    with open(path_datafile, 'r') as datafile:
+        string = datafile.read().strip()
+        if string:
+            g_index = json.loads(string)
+            last_datafile_string = string
+except FileNotFoundError:
+    pass    # Nothing to read here — use default, empty expenses list
+except json.decoder.JSONDecodeError as e:
+    print(e)
+    print('Failed: datafile for budgetboy exists, but could not be read.')
+    exit()  # Force quit script
 
 
+####################################################################################################
+#### Processor State and Handler                                                                ####
+####################################################################################################
+
+class InputProcessorState:
+    "Represents the input-looper's state at any one instant."
+
+    def __init__(self, index, args, command_set):
+        self.index = index
+        self.record = None
+        self.discard_record = False
+        self.args = args
+        self.last_arg = None
+        self.command_set = command_set
+        self.polling_enabled = False
+
+    def shift(self):
+        self.last_arg, self.args = shift(self.args)
+        return self.last_arg
+
+    def unshift(self):
+        if self.last_arg != None:
+            self.args = [self.last_arg] + self.args
+            self.last_arg = None
+
+    def clear(self):
+        self.args = []
+
+    def polling_requested(self):
+        "Returns True if this state desires user-input polling fill its arguments queue."
+        return (not self.args) and self.polling_enabled and not self.record
+
+def input_processor(state):
+    "The game-loop, if you will."
+    while True:
+        if state.polling_requested():
+            try:
+                state.args = shlex.split( input('> ') )
+            except ValueError:
+                print('Input was malformed. Try again.')
+
+        # Execute command instruction and collect new state for next iteration.
+        command = state.shift()
+        state = state.command_set.switch(command)(state)
+        assert type(state) == InputProcessorState, 'Command switch must return and object of type InputProcessorState.'
+
+        # until clause
+        if not state.args and not state.record and not state.polling_requested():
+            break
+
+class Switcher:
+    """Value switch-case framework for matching keys to returns.
+    Acceptable input for 'dictionary' are {key: value}, (key, value) and ([keys], value).
+    The 'default' value is returned when switch(value) doesn't return a match."""
+    def __init__(self, dictionary, default):
+        self.switcher = {}
+        self.default = default
+
+        if type(dictionary) == dict:
+            self.switcher = dictionary
+        else:
+            # Assembles a dict of strictly unique keys and non-unique functions from a list of tuples.
+            for pair in dictionary:
+                keys, value = pair[0], pair[1]
+                if type(keys) != list and type(keys) != tuple:
+                    keys = [keys]
+                for key in keys:
+                    assert key not in self.switcher, f"Switcher Assembly: Key '{key}' is already in use."
+                    self.switcher[key] = value
+    
+    def switch(self, key):
+        return self.switcher.get(key, self.default)
 
 
+####################################################################################################
+#### User-Input Interpreter: Command Sets                                                       ####
+####################################################################################################
+
+####################################################################################################
+#### Global Set
+
+def display_forecast(state):
+    "Prints a 30-day from today upcoming payments update."
+
+    forecast = 30       # Number of days to look ahead
+
+    today = date.today()                                # Period start date
+    forecast_date = today + timedelta(days=forecast)    # Period end date
+    net_total = 0                                       # The sum of all expenses in the 30-day forecast (including overdue)
+    expenses = []                                       # The expanded list of all expense objects within the forecast.
+    section_strings = []                                # Final display strings for each section of the forecast.
+
+    # Expand the index of expense objects into all relevant dates within the forecast period.
+    # This assumes that the global index has already been updated to revolve around the current date.
+    for e in g_index['expenses'].values():
+        if e['active']:
+            expenses.extend(Expense.expand(e, forecast))
+            if e['important'] and Expense.duedate(e) > forecast_date:
+                expenses.append(e)
+
+    # Sort the resulting list
+    expenses = sorted(expenses, key=lambda e: Expense.compare_str(e))
+
+    # Divide the list of expenses into sections
+    e_overdue = [ e for e in expenses if Expense.duedate(e) < today ]
+    e_forecast = [ e for e in expenses if today <= Expense.duedate(e) <= forecast_date ]
+    e_important = [ e for e in expenses if forecast_date < Expense.duedate(e) ]
+
+    # Build the display string
+
+    # Returns the string s with duplicate duedates detailed by expenses replaced with whitespace.
+    def simplify_dates(expenses, s):
+        date_strings = { e['duedate'][:-6]: 0 for e in expenses }.keys()
+        blank = '      '
+        for dt in date_strings:
+            li = s.rsplit(dt, s.count(dt)-1)
+            s = blank.join(li)
+        return s
+
+    # Header
+    printbuffer(f'{date_tostring(today)} — Next 30 Days:')
+    printbuffer()
+
+    # Overdue expenses
+    if e_overdue:
+        lines = ['Overdue:']
+        lines.extend( [format_expense(e) for e in e_overdue] )
+        net_total += sum([ int(e['amount']) for e in e_overdue ])
+        string = simplify_dates(e_overdue, '\n'.join(lines))
+        if string:
+            section_strings.append(string)
+    
+    # Expenses through the 30-day forecast
+    if e_forecast:
+        lines = [ format_expense(e) for e in e_forecast ]
+        net_total += sum([ int(e['amount']) for e in e_forecast ])
+        net_str = format_currency(net_total)
+        lines.append('')
+        lines.append(f"{'Net Total':>22} {net_str:>27}")
+        string = simplify_dates(e_forecast, '\n'.join(lines))
+        if string:
+            section_strings.append(string)
+
+    # Important (marked) expenses upcoming.
+    if e_important:
+        lines = [ format_expense(e) for e in e_important ]
+        string = simplify_dates(e_important, '\n'.join(lines))
+        if string:
+            section_strings.append(string)
+
+    # Include account summaries
+    lines = [ format_account(a) for a in g_index['accounts'].values() ]
+    string = '\n'.join(lines)
+    if string:
+        section_strings.append(string)
+
+    # Final display (buffer print)
+    if section_strings:
+        printbuffer('\n\n'.join(section_strings))
+    else:
+        printbuffer('No items listed.')
+
+    displaybuffer()
+    return state
+
+def display_all_expenses(state):
+    "Prints all objects in the expenses list, then all accounts."
+
+    expenses = g_index['expenses'].values()
+    expenses = sorted(expenses, key=lambda e: Expense.compare_str(e))
+    for e in expenses:
+        printbuffer(format_expense_full(e))
+
+    printbuffer()
+
+    accounts = g_index['accounts'].values()
+    for a in accounts:
+        printbuffer(format_account(a))
+
+    displaybuffer()
+    return state
+
+def display_projection(state):
+    "Displays an itemized expense list for today through some date."
+
+    # Get the projection date in days from today from the user.
+    s = state.shift()
+    today = date.today()
+    default_future_date = today + timedelta(days=30)            # Not necessary, but neat trick for itemized list instead of date view.
+    future_date = parse_date(s) if s else default_future_date
+    days = (future_date - today).days if future_date else None
+
+    # Malformed request handling
+    if days == None:
+        print(f"Could not interpret '{s}' as a date.")
+    elif days < 0:
+        print(f"Cannot project into the past.")
+    # Date was valid, proceed
+    else:
+        net_total = 0
+        itemized_budget = []
+
+        # For all active expenses, sum all occurrences between now and future.
+        active_expenses = list(filter(lambda e: e['active'], g_index['expenses'].values()))
+        for e in active_expenses:
+            li = list(Expense.expand(e, days))
+            ID = e['id']
+            name = e['name']
+            count = f'x{len(li)}'
+            sum_total = sum([ e['amount'] for e in li ])
+            sum_str = format_currency(sum_total)
+            display_str = f"{ID}  {name:20.20}  {count:>3} = {sum_str:>13}"
+            itemized_budget.append([display_str, sum_total])
+            net_total += sum_total
+        
+        # Cull and sort items by largest sum
+        itemized_budget = list(filter(lambda p: p[1] != 0, itemized_budget))
+        itemized_budget = [ p[0] for p in sorted(itemized_budget, key=lambda p: abs(p[1]), reverse=True) ]
+
+        net_str = format_currency(net_total)
+        today_str = date_tostring(today)
+        future_str = date_tostring(future_date)
+        
+        # Empty budget message.
+        if not itemized_budget:
+            itemized_budget.append(f"No expenses during this period.")
+
+        # Formal print
+        printbuffer("{}".format(format_daterange(today_str, future_str)))
+        printbuffer()
+        printbuffer('\n'.join(itemized_budget))
+        printbuffer()
+        printbuffer(f"{'Net Total':>30}  {net_str:>14}")
+
+        # TODO Simulate payments into accounts and display those here, too.
+        # 999 General Account                   +$3866
+        # 442 New PC Savings Account             +$550
+        #
+        # I could possibly copy the accounts list and make deposits into those based on keys from expenses.
+        # I cannot use Account.adjust() because that's not how it was written... hm.
+
+        displaybuffer()
+
+    state.clear()
+    return state
+
+def create_new_expense(state):
+    ""
+    state.record = new_expense()
+    state.discard_record = False
+    state.command_set = expense_command_set
+    return state
+
+def create_new_account(state):
+    ""
+    state.record = new_account()
+    state.discard_record = False
+    state.command_set = account_command_set
+    return state
+
+def edit_record(state):
+    ID = parse_idnumber(state.shift())
+
+    if not ID:
+        state.clear()
+
+    elif ID in g_index['expenses'].keys():
+        state.record = g_index['expenses'][ID]
+        state.discard_record = False
+        state.command_set = expense_command_set
+
+    elif ID in g_index['accounts'].keys():
+        state.record = g_index['accounts'][ID]
+        state.discard_record = False
+        state.command_set = account_command_set
+
+    else:
+        print(f"No item with ID '{ID}' found in record.")
+        state.clear()
+
+    return state
+
+def del_records(state):
+    "Attempts to delete from the record the expense object described by ID-string via the next user argument."
+
+    expenses = g_index['expenses']
+    accounts = g_index['accounts']
+
+    def delete(index, key, display, unlink=False):
+        if key == '999':
+            print("Cannot delete the global account.")
+        else:
+            if unlink:
+                linked_expenses = filter(lambda e: e['id'] == key, expenses.values())
+                for e in linked_expenses:
+                    e['id'] = g_default_account_id
+            print( display(index[key]) )
+            print('Deleted.')
+            del index[key]
+
+    while (arg := state.shift()):
+        ID = parse_idnumber(arg)
+        if ID in accounts.keys():
+            delete(accounts, ID, format_account, unlink=True)
+        elif ID in expenses.keys():
+            delete(expenses, ID, format_expense_full)
+        else:
+            print(f"No item exists with the ID '{ID}'.")
+
+    state.clear()
+    return state
+
+def pay_expense(state):
+    """For each valid ID submitted by the user, rolls the associated expense's date forward and adds its sum
+    to its linked account."""
+    expenses = g_index['expenses']
+    while (arg := state.shift()):
+        ID = parse_idnumber(arg)
+        if ID in expenses.keys():
+            Expense.pay(expenses[ID])
+        else:
+            print(f"No expense exists with the ID '{ID}'.")
+    state.clear()
+    return state
+
+def undo_pay_expense(state):
+    """For each valid ID submitted by the user, rolls the associated expense's date back and subtracts its
+    sum from its linked account."""
+    expenses = g_index['expenses']
+    while (arg := state.shift()):
+        ID = parse_idnumber(arg)
+        if ID in expenses.keys():
+            Expense.unpay(expenses[ID])
+        else:
+            print(f"No expense exists with the ID '{ID}'.")
+    state.clear()
+    return state
+
+def playground_mode(state):
+    "Enables free-edit mode by turning on continuous polling and disabling saving."
+    global save_on_exit
+    save_on_exit = False
+    state.polling_enabled = True
+    state.clear()
+    return state
+
+def end_playground_mode(state):
+    "Disenables free-edit mode by turning of continuous polling."
+    if state.polling_enabled:
+        state.polling_enabled = False
+        state.clear()
+    return state
+
+def reenable_save(state):
+    "Re-enables saving on exit, if it was disabled already (by playground mode)."
+    global save_on_exit
+    if state.polling_enabled:
+        save_on_exit = True
+        state.clear()
+    return state
+
+def display_helptext(state):
+    "Prints the script's manual, if you will."
+    print(helptext)
+    state.clear()
+    return state
+
+global_command_set = Switcher({
+    None: display_forecast,
+    'all': display_all_expenses,
+    'project': display_projection,
+    'pay': pay_expense,
+    'undo-pay': undo_pay_expense,
+    'add': create_new_expense,
+    'new-account': create_new_account,
+    'del': del_records,
+    'edit': edit_record,
+    'playground': playground_mode,
+    'done': end_playground_mode,
+    'enable-saving': reenable_save,
+    'help': display_helptext
+    },
+    lambda state: state
+    )
 
 
+####################################################################################################
+#### New Expense Set
+
+def expense_discard(state, msg):
+    """Feedback and consequence pair for convenience. Any error in user input for new expense should
+    result in discarding the data and requesting a second attempt."""
+    print(msg)
+    state.discard_record = True
+
+def expense_done(state):
+    "New expense object creation is finished: validate and add, or discard."
+    # Date fixing — duedate setting superceeds startdate
+    duedate = date_fromstring(state.record['duedate'])
+    startdate = date_fromstring(state.record['startdate'])
+    termdate = date_fromstring(state.record['termdate']) if state.record['termdate'] else None
+    if duedate < startdate:
+        startdate = duedate
+    if state.record['period'] == Period.singular:
+        termdate = startdate = duedate
+    state.record['duedate'] = date_tostring(duedate)
+    state.record['startdate'] = date_tostring(startdate)
+    state.record['termdate'] = date_tostring(termdate) if termdate else None
+
+    # Final validation check
+    if state.record['name'] == '':
+        expense_discard(state, "This expense was never named.")
+    if state.record['amount'] == 0:
+        expense_discard(state, "An amount wasn't given for this expense: has a value of $0.")
+    if startdate > duedate or termdate and duedate > termdate:
+        expense_discard(state, f"The duedate and active period do not align: s={startdate} → d={duedate} → t={termdate}")
+    
+    # Make sure duedate matches allowable dates.
+    if state.record['period'] == Period.monthly and 29 <= duedate.day <= 31:
+        expense_discard(state, f"A duedate of 29–31 for a monthly recurrence period is not allowed: given {duedate}")
+    if state.record['period'] == Period.annual and duedate.month == 2 and duedate.day == 29:
+        expense_discard(state, f"A duedate on leapday for an annual recurrence period is not allowed: given {duedate}")
+
+    # Feedback to user, or final add
+    if state.discard_record:
+        print("New expense was not added.")
+    else:
+        state.index['expenses'][state.record['id']] = state.record
+
+    # Reset interpreter to global set
+    state.record = None
+    state.command_set = global_command_set
+    return state
+
+def expense_setinterpretable(state):
+    "Last user token is an unknown string: interpreted as a date, amount or name."
+    arg = state.last_arg
+    # Try to set duedate
+    if parse_date(arg):
+        state.unshift()
+        expense_setdate(state, 'duedate')
+    # Try to set amount
+    elif re.search(regex_currency, arg):
+        state.record['amount'] = parse_amount(arg)
+    # Assume it's a name then
+    else:
+        state.record['name'] = arg
+    return state
+
+def expense_setaccount(state):
+    "Next user token is an account ID to link this expense to."
+    arg = state.shift()
+    if not arg.isnumeric() or not len(arg) == 3:
+        expense_discard(state, f"The string '{arg}' is not interpretable as an ID (length 3, numbers only).")
+    else:
+        ID = parse_idnumber(state.shift())
+        if ID not in state.index['accounts']:
+            expense_discard(state, f"No account with the ID '{ID}' was found.")
+        else:
+            state.record['account'] = ID
+    
+    return state
+
+def expense_setdate(state, field):
+    arg = state.shift()
+    if (d := parse_date(arg)):
+        state.record[field] = date_tostring(d)
+    else:
+        expense_discard(state, f"Token '{arg}' could not be parsed as a date.")
+    return state
+
+def expense_setstartdate(state):
+    return expense_setdate(state, 'startdate')
+
+def expense_settermdate(state):
+    return expense_setdate(state, 'termdate')
+
+def expense_setperiod(state, period):
+    state.record['period'] = period
+    if period != Period.singular and state.record['termdate'] == state.record['startdate']:
+        state.record['termdate'] = None
+    return state
+
+def expense_setperiod_single(state):
+    return expense_setperiod(state, Period.singular)
+def expense_setperiod_week(state):
+    return expense_setperiod(state, Period.weekly)
+def expense_setperiod_biweek(state):
+    return expense_setperiod(state, Period.biweekly)
+def expense_setperiod_month(state):
+    return expense_setperiod(state, Period.monthly)
+def expense_setperiod_annual(state):
+    return expense_setperiod(state, Period.annual)
+
+def expense_setimportant(state):
+    state.record['important'] = True
+    return state
+
+def expense_setnotimportant(state):
+    state.record['important'] = False
+
+def expense_setautomatic(state):
+    state.record['automatic'] = True
+    return state
+
+def expense_setnotautomatic(state):
+    state.record['automatic'] = False
+    return state
+
+expense_command_set = Switcher((
+    (None, expense_done),
+    (['acc', 'account'], expense_setaccount),
+    (['s', 'singular', 'one-time', 'once'], expense_setperiod_single),
+    (['w', 'week', 'weekly'], expense_setperiod_week),
+    (['b', 'biweek', 'biweekly', 'bi-weekly'], expense_setperiod_biweek),
+    (['m', 'month', 'monthly'], expense_setperiod_month),
+    (['y', 'year', 'yearly', 'annual', 'annually'], expense_setperiod_annual),
+    (['start', 'startdate', 'start-date'], expense_setstartdate),
+    (['term', 'termdate', 'term-date', 'terminate'], expense_settermdate),
+    (['*', '**', 'important', 'always-show'], expense_setimportant),
+    (['common', 'normal-show'], expense_setnotimportant),
+    (['auto', 'automatic', 'autopay'], expense_setautomatic),
+    (['manual', 'manualpay'], expense_setnotautomatic)
+    ),
+    expense_setinterpretable
+    )
 
 
-# Returns true if n is in the interval min to max, inclusive
-def within(n, min, max):
-    return (n >= min and n <= max)
+####################################################################################################
+#### New Account Set
 
-# Returns true if n is in the interval min to max, exclusive
-def between(n, min, max):
-    return (n > min and n < max)
+def account_done(state):
+    "New account object creation is finished: validate and add, or discard."
+    # Final validation check
+    if state.record['name'] == '':
+        print("This account was never named.")
+        state.discard_record = True
 
-# Compares two comparable items, and returns -1, 0 or 1 according to a's ordering relative to b.
-# If you're going to use this in __gt__() or any of its kind, ONLY USE ON SUBTYPES to avoid infinite loops!
-def compare(a, b):
-    if type(a) != type(b):
-        raise ValueError("Recieved mixed arguments of type {} and {}".format(typename(a), typename(b)))
-    return 0 if a == b else (1 if a > b else -1)
+    # Feedback to user, or final add.
+    if state.discard_record:
+        print("New account was not added.")
+    else:
+        state.index['accounts'][state.record['id']] = state.record
+    
+    # Reset interpreter to global set
+    state.record = None
+    state.command_set = global_command_set
+    return state
 
-# debug feature
-def log(s):
-    print(s)
+def account_setinterpretable(state):
+    "Last user token is an unknown string: interpreted as a name or an account balance."
+    arg = state.last_arg
+    # Try to set balance
+    if re.search(regex_currency, arg):
+        state.record['balance'] = parse_amount(arg)
+    # Assume it's a name then.
+    else:
+        state.record['name'] = arg
+    return state
 
-# Returns the object's class name only, not it's accessor.
-# Useful only if accessor is trivial.
-def typename(obj):
-    return type(obj).__name__
+account_command_set = Switcher((
+    (None, account_done),
+    ),
+    account_setinterpretable
+    )
 
-## Here's the epics:
-program = Program()
 
-program.run()
+####################################################################################################
+#### Run Script                                                                                 ####
+####################################################################################################
+
+####################################################################################################
+#### General Support Functions
+
+def update_global_index():
+    "Brings the official record up to the current date."
+    today = date.today()
+    overdue_begin_date = today - timedelta(days=7)
+
+    past_overdue = lambda e: not e['automatic'] and Expense.duedate(e) < overdue_begin_date
+    not_current = lambda e: e['automatic'] and Expense.duedate(e) < today
+
+    for e in g_index['expenses'].values():
+        while e['active'] and (past_overdue(e) or not_current(e)):
+            e = Expense.pay(e)
+
+def clean_global_index():
+    """Removes outdated expense objects from the global index.
+    This function assumes the global index has been updated to revolve around the current date."""
+    today = date.today()
+    historical_cutoff = today - timedelta(days=365)                 # I don't care about leap-years
+    validator = lambda kv: Expense.duedate(kv[1]) >= historical_cutoff
+    g_index['expenses'] = dict(filter( validator, g_index['expenses'].items() ))
+
+
+####################################################################################################
+#### Execute
+
+update_global_index()
+clean_global_index()
+
+processor_state = InputProcessorState(g_index, argv, global_command_set)
+input_processor(processor_state)
+
+
+####################################################################################################
+#### Close Script                                                                               ####
+####################################################################################################
+
+# Save the program and backup the old data collected before program execution.
+#save_on_exit = False
+if save_on_exit:
+    with open(path_backupfile, 'w') as backup:  # Save the last-known-working-copy of the datafile.
+        backup.write(last_datafile_string)
+    with open(path_datafile, 'w') as datafile:  # Save the new changes to the working datafile.
+        save = json.dumps(g_index)
+        datafile.write(save)

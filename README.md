@@ -1,24 +1,27 @@
 # budgetboy
 
-A simple CLI program.
+[picture]
 
-It keeps track of your bills, your earnings, and your balance, as well as allowing you to project your budget into the future, showing you what you could earn in so much time if you'd stop spending it on dumb.
+Tell it what your bills are and it will tell you when to pay them forever. It can also keep track of income payments, heretofore known as a "negative bill," and account balances (sort of: see footnote).
+
+The script can project your budget far into the future with an itemized list of your expenses and negative bills between today and some date, showing you what you could earn in so much time if you'd just stop spending it on dumb.
+
+And finally, "playground mode" will let you affect your budget in experimental ways without destroying the good one you have now.
 
 It's written in Python, but it's trivial to setup a shell script which does the extra/redundant typing for you. I'll probably include one in this repository at some point.
 
-Currently, it does these things:
- - Maintains a relative calendar of upcoming bills and incomes.
- - Reports the net total of earnings against expenses.
- - Can generate a calendar with this net total over long periods of time into the future.
- - Easy add/remove methods for incomes and expenses. Particularly of one-time expenses which significantly affect your savings.
+Call the script:
 
-In the future, it will do these things:
- - A 'what if' mode which will allow heavy modification of the budget without affecting the real one.
- - Inform you of recent/past-due bills in case you weren't paying attention.
- - Allow setup of savings sums which can be 'auto-deposited into' or 'withdrawn from' to simulate what you ought to be doing in real life.
- - Display a condensed, itemized budget instead of the calendar view for long periods of time.
- - Have a help screen.
- 
- In addition to several QOL adjustments I plan on making.
-   
- This script, obviously, does not handle your money for you. It's simply a planning tool.
+```powershell
+py budgetboy.py help
+```
+
+To print an explanation on how to use it.
+
+(Note that this script is separate from any financial services you might use; it is simply a planning tool.)
+
+#### **The Issue With Accounts:**
+
+There is no "transfer" action. As this was written for *me,* there probably won't be one, either.
+
+If you have two accounts, "General" and "Savings," and you want to represent a $50 deposit *from* General *into* Savings, you would add an expense of -50 linked to the savings account. Savings will accumulate a negative number, but the calendar won't think you make $50 more than you do. It will actually think you make $50 less, which is.. sensible, I suppose.
