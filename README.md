@@ -1,6 +1,6 @@
 # budgetboy
 
-[picture]
+![Example](/example.png)
 
 Tell it what your bills are and it will tell you when to pay them forever. It can also keep track of income payments, heretofore known as a "negative bill," and account balances (sort of: see footnote).
 
