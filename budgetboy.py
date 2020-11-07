@@ -470,10 +470,10 @@ def rolldate(d, period, regressing=False):
     m_range = monthrange(d.year, month)[1]
 
     # Calc year-range for annual rolls
-    year = d.year + 1*(-regressing)
+    year = d.year + 1*(not regressing) - 1*(regressing)
     day = min(d.day, monthrange(year, month)[1])
     y_range = abs(d - date(year, d.month, day)).days
-
+    
     switcher = {
         Period.singular: timedelta(days=0),
         Period.weekly: timedelta(days=7),
